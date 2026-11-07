@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Officina XR</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; background: #000; color: #dfe6ee; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; overflow: hidden; }
+    #app { position: fixed; inset: 0; }
+    #intro {
+      position: fixed; top: 16px; left: 16px; max-width: 380px; padding: 14px 16px;
+      background: rgba(12, 14, 18, 0.82); border: 1px solid #263040; border-radius: 12px; font-size: 13px; line-height: 1.45;
+    }
+    #intro h1 { margin: 0 0 6px; font-size: 17px; letter-spacing: 0.04em; }
+    #intro p { margin: 4px 0; color: #a9b4c2; }
+    #intro kbd { background: #1c222b; border: 1px solid #334; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+    #intro button.close { position: absolute; top: 6px; right: 8px; background: none; border: 0; color: #889; font-size: 16px; cursor: pointer; }
+    #account {
+      position: fixed; top: 16px; right: 16px; width: min(340px, calc(100% - 32px)); padding: 16px 18px; z-index: 5;
+      background: rgba(12, 14, 18, 0.9); border: 1px solid #263040; border-radius: 14px; font-size: 14px;
+    }
+    #account.min > :not(.x) { display: none; }
+    #account.min { width: auto; padding: 8px 40px 8px 14px; }
+    #account.min::before { content: 'Account'; color: #a9b4c2; }
+    #account h2 { margin: 0 0 4px; font-size: 17px; }
+    #account .sub { margin: 0 0 12px; color: #a9b4c2; }
+    #account .x { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: #889; font-size: 16px; cursor: pointer; }
+    #account .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+    #account .tabs button { flex: 1; padding: 8px; border-radius: 9px; border: 1px solid #2b3440; background: #151a21; color: #a9b4c2; cursor: pointer; }
+    #account .tabs button.on { background: #1f4f8a; color: #fff; border-color: #3fa9ff; }
+    #account form { display: flex; flex-direction: column; gap: 8px; }
+    #account input { padding: 11px 12px; border-radius: 9px; border: 1px solid #2b3440; background: #151a21; color: #e6edf5; font-size: 15px; }
+    #account button.primary, #account button.google, #account .link button {
+      padding: 11px; border-radius: 9px; border: 0; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%;
+    }
+    #account button.primary { background: #3fa9ff; color: #06121f; margin-top: 4px; }
+    #account button.google { background: #e6edf5; color: #111; margin-top: 8px; }
+    #account .links { display: flex; justify-content: space-between; gap: 10px; margin-top: 12px; }
+    #account a { color: #8fc6ff; font-size: 13px; }
+    #account .msg { margin: 10px 0 0; color: #ffc845; }
+    #account .hint { color: #a9b4c2; font-size: 12px; margin: 6px 0; }
+    #account .people { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-bottom: 12px; color: #e6edf5; }
+    #account .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 6px; }
+    #account .dot.me { background: #e6edf5; margin-left: 0; }
+    #account .link { display: flex; gap: 6px; margin-top: 10px; }
+    #account .link input { flex: 1; min-width: 0; font-size: 12px; }
+    #account .link button { width: auto; padding: 0 14px; background: #45d483; color: #06121f; }
+    #chat { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); width: min(520px, calc(100% - 32px)); display: flex; gap: 8px; }
+    #chat input { flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid #2b3440; background: rgba(14, 16, 20, 0.9); color: #e6edf5; font-size: 14px; }
+    #chat button { padding: 10px 14px; border-radius: 10px; border: 1px solid #2b3440; background: #1c222b; color: #e6edf5; cursor: pointer; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="intro">
+    <button class="close" onclick="this.parentElement.remove()" aria-label="Chiudi">×</button>
+    <h1>OFFICINA XR</h1>
+    <p>Spazio nero, una scrivania in noce e un'AI che brilla in lontananza. Crea pezzi da zero, raggruppali in assiemi ed esplodili fino all'ultima vite.</p>
+    <p><b>Mani:</b> pizzica un pezzo per prenderlo · tocca i pulsanti col dito · due mani per scalarlo · punta il pavimento e pizzica per teletrasportarti.</p>
+    <p><b>Controller:</b> grilletto = raggio (afferra, pulsanti, teletrasporto) · grip = presa diretta · stick sinistro = cammina · stick destro = gira.</p>
+    <p><b>Desktop:</b> clic per selezionare e trascinare sul piano (<kbd>Alt</kbd>+trascina = in altezza), <kbd>Shift</kbd>+clic selezione multipla, trascina il vuoto per orbitare. Tasti: <kbd>E</kbd> esplodi · <kbd>R</kbd> ricomponi · <kbd>G</kbd> raggruppa · <kbd>D</kbd> duplica · <kbd>Canc</kbd> elimina.</p>
+  </div>
+  <div id="account" hidden></div>
+  <form id="chat" autocomplete="off">
+    <input id="chat-input" placeholder="Scrivi all'AI… (es. &quot;crea un ingranaggio&quot;, &quot;esplodi tutto&quot;)" />
+    <button type="submit">Invia</button>
+  </form>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
