@@ -211,7 +211,9 @@ const brain = new Brain({
 
 /** Ogni comando (voce, testo, pannello «Parla con AI») passa da qui. */
 function command(text) {
-  if (brain.enabled) brain.handle(text);
+  // scansione e diagnostica partono subito, senza passare da Claude
+  const quick = /scansion|scanneriz|diagnostic|cosa non (va|funziona)/i.test(text);
+  if (brain.enabled && !quick) brain.handle(text);
   else actions.voice(text);
 }
 ai.onHeard = command;
@@ -225,7 +227,9 @@ const scanner = new Scanner({
   scene, camera, xrInput, headsetCamera: camera3, brain, ai, actions, workspace,
   isMixedReality: () => mixedReality,
 });
-ctx.scan = () => scanner.start(null);
+ctx.scan = () => scanner.start(scanner.bestHand());
+ctx.diag = () => scanner.diagnose();
+ctx.scanCancel = () => scanner.cancel();
 env.turn = (a) => xrInput.turn(a);
 env.home = () => xrInput.home();
 new MouseInput(renderer, camera, controls, { panel, workspace, actions });
@@ -495,6 +499,15 @@ async function enableVoice() {
   return ok;
 }
 document.getElementById('voice-btn')?.addEventListener('click', () => enableVoice());
+const voiceChoice = document.getElementById('voice-choice');
+if (voiceChoice) {
+  voiceChoice.value = neural.voice;
+  voiceChoice.addEventListener('change', async () => {
+    neural.unlock();
+    await neural.setVoice(voiceChoice.value);
+    ai.say('Ciao, questa è la mia nuova voce.');
+  });
+}
 // entrando in VR il tocco sblocca l'audio; se il microfono era già permesso, si prepara tutto da solo
 async function prepareVoiceOnEnter() {
   neural.unlock();
@@ -548,9 +561,12 @@ renderer.xr.addEventListener('sessionstart', () => {
   xrInput.home();
   const session = renderer.xr.getSession();
   applyMixedLook(session?.environmentBlendMode && session.environmentBlendMode !== 'opaque');
-  setTimeout(() => ai.say(mixedReality
-    ? 'Ora vedi la tua stanza. La scrivania e gli oggetti sono qui con te.'
-    : 'Ciao. Sono qui, in fondo. Usa le mani o i controller, e chiedimi quello che vuoi.'), 700);
+  setTimeout(async () => {
+    if (!mixedReality) { ai.say('Ciao, sono qui sulla scrivania. Tieni premuto A e chiedimi quello che vuoi.'); return; }
+    // in realtà mista controllo subito se la scansione può funzionare e dico cosa manca
+    const r = await scanner.readiness();
+    ai.say(r.ok ? 'Vedo la tua stanza. Prendi un oggetto in mano e dimmi «scansiona».' : r.msg, { full: true });
+  }, 900);
 });
 renderer.xr.addEventListener('sessionend', () => {
   controls.enabled = true;

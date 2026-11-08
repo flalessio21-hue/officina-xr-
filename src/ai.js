@@ -269,7 +269,20 @@ export class AIOrb {
     this.subTimer = 4;
   }
 
-  say(text) {
+  /** Ciò che si dice a voce resta breve: la prima frase, al massimo ~110 caratteri. */
+  static brief(text) {
+    let t = String(text || '').replace(/\s+/g, ' ').trim();
+    const first = t.match(/^.*?[.!?](\s|$)/);
+    if (first && first[0].trim().length >= 6) t = first[0].trim();
+    if (t.length > 110) {
+      const cut = t.lastIndexOf(',', 110);
+      t = (cut > 40 ? t.slice(0, cut) : t.slice(0, t.lastIndexOf(' ', 110))) + '.';
+    }
+    return t;
+  }
+
+  say(text, { full = false } = {}) {
+    if (!full) text = AIOrb.brief(text);
     this.onText?.(text);
     this.setSubtitle(text);
     this.speakUntil = performance.now() / 1000 + 0.8 + text.length * 0.065;
@@ -279,7 +292,7 @@ export class AIOrb {
       this.neuralSpeaking = true;
       this.speakUntil = performance.now() / 1000 + 60;
       const gen = (this.sayGen = (this.sayGen || 0) + 1);
-      this.neural.speak(text, { pitch: 1 + (this.pitch - 1) * 0.3 }).finally(() => {
+      this.neural.speak(text, { pitch: this.neuralSpeed || 1 }).finally(() => {
         if (gen !== this.sayGen) return;
         this.neuralSpeaking = false;
         this.speaking = false;

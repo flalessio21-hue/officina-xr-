@@ -72,15 +72,15 @@ export class Scanner {
       tips.push(tip);
       const r = tip.distanceTo(mcp);
       // dita piegate attorno a qualcosa: né distese (≈9 cm) né chiuse a pugno vuoto (≈3 cm)
-      if (r > 0.032 && r < 0.072) curled++;
+      if (r > 0.028 && r < 0.078) curled++;
     }
     const indexTip = tips[0];
-    if (curled < 3 || thumb.distanceTo(indexTip) < 0.03) return null; // pizzico: è un gesto, non una presa
+    if (curled < 2 || thumb.distanceTo(indexTip) < 0.025) return null; // pizzico: è un gesto, non una presa
     // davanti agli occhi, a portata di sguardo
     this.camera.getWorldPosition(_h);
     this.camera.getWorldDirection(_f);
     _v.subVectors(wrist, _h);
-    if (_v.length() > 0.6 || _v.normalize().dot(_f) < 0.55) return null;
+    if (_v.length() > 0.7 || _v.normalize().dot(_f) < 0.4) return null;
     // centro dell'oggetto: tra il pollice e le punte delle dita
     const center = new THREE.Vector3().add(thumb);
     for (const t of tips) center.add(t);
@@ -97,7 +97,7 @@ export class Scanner {
       const p = this.holdingReal(c);
       const t = p ? (this.holdTime.get(c) || 0) + dt : 0;
       this.holdTime.set(c, t);
-      if (t > 0.8) { this.start(c); return; }
+      if (t > 0.7) { this.start(c); return; }
     }
   }
 
@@ -158,6 +158,9 @@ export class Scanner {
     let shoot = false;
     if (quat) shoot = this.shots.every((s) => !s.q || s.q.angleTo(quat) > 0.6) && this.elapsed > 0.3;
     else if (!this.hand && this.elapsed > this.nextTimed) { shoot = true; this.nextTimed += 1.2; }
+    if (shoot && this.cam.ready && this.shots.length === 0 && (this.brightness() ?? 255) < 6) {
+      return this.cancel('Le telecamere mi danno solo immagini nere: il browser del tuo visore non mi fa vedere la stanza.');
+    }
     if (shoot && this.cam.ready) {
       this.shots.push({ canvas: this.cam.canvas(), q: quat?.clone() });
       const n = this.shots.length;
@@ -169,6 +172,53 @@ export class Scanner {
     if (!enough) return;
     if (n < 2) return this.cancel(this.hand ? 'L\'ho perso di vista. Riprendilo in mano davanti agli occhi e riproviamo.' : 'Non sono riuscita a fare abbastanza foto.');
     this.build();
+  }
+
+  /** La mano che sembra tenere qualcosa (per la scansione avviata a voce), altrimenti null. */
+  bestHand() {
+    for (const c of this.xrInput.controllers) if (this.xrInput.isHand(c) && this.holdingReal(c)) return c;
+    return null;
+  }
+
+  /** Cosa manca perché la scansione funzioni? (detto a voce all'ingresso in realtà mista) */
+  async readiness() {
+    if (!this.brain.enabled) return { ok: false, msg: 'Per scansionare mi serve la chiave di Claude: inseriscila nella pagina iniziale, al punto 2.' };
+    try {
+      if (!this.cam.ready) await this.cam.start();
+    } catch (e) {
+      return { ok: false, msg: `Non riesco ad aprire le telecamere del visore (${e.name || 'errore'}). Esci, tocca «Abilita fotocamera» nella pagina iniziale e consenti l'accesso.` };
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    const lum = this.brightness();
+    if (lum != null && lum < 6) return { ok: false, msg: 'Le telecamere mi danno solo immagini nere: il browser del tuo visore non mi fa vedere la stanza.' };
+    return { ok: true };
+  }
+
+  brightness() {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 32; c.height = 24;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(this.cam.video, 0, 0, 32, 24);
+      const d = g.getImageData(0, 0, 32, 24).data;
+      let s = 0;
+      for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2];
+      return s / (d.length / 4) / 3;
+    } catch { return null; }
+  }
+
+  /** Riassunto per capire cosa non va (comando «diagnostica»). */
+  async diagnose() {
+    const hands = this.xrInput.controllers.filter((c) => this.xrInput.isHand(c)).length;
+    const r = await this.readiness();
+    const v = this.cam.video;
+    const parts = [
+      this.brain.enabled ? 'chiave di Claude presente' : 'manca la chiave di Claude',
+      this.cam.ready ? `telecamera attiva ${v.videoWidth}×${v.videoHeight}` : 'telecamera spenta',
+      this.isMixedReality() ? 'realtà mista attiva' : 'non sei in realtà mista',
+      hands ? `${hands === 2 ? 'due mani tracciate' : 'una mano tracciata'}` : 'mani non tracciate, posa i controller',
+    ];
+    return `${parts.join(', ')}. ${r.ok ? 'La scansione è pronta.' : r.msg}`;
   }
 
   // ---------- ricostruzione ----------

@@ -1,8 +1,11 @@
 /* Sintesi vocale italiana nel browser (Piper VITS), in un worker per non bloccare la VR.
- * Fonemi: espeak-ng (piper-phonemize wasm). Voce: OpenVoiceOS "Miro" it-IT (CC BY-NC-ND 4.0, uso personale). */
+ * Fonemi: espeak-ng (piper-phonemize wasm). Voci: rhasspy "Paola" it-IT (dati CC0) e OpenVoiceOS "Miro" it-IT (CC BY-NC-ND 4.0). */
 const ORT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
 const PHON = 'https://cdn.jsdelivr.net/npm/@diffusionstudio/piper-wasm@1.0.0/build/';
-const MODEL = 'https://huggingface.co/OpenVoiceOS/pipertts_it-IT_miro/resolve/main/miro_it-IT.onnx';
+const VOICES = {
+  paola: 'https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/paola/medium/it_IT-paola-medium.onnx',
+  miro: 'https://huggingface.co/OpenVoiceOS/pipertts_it-IT_miro/resolve/main/miro_it-IT.onnx',
+};
 const CACHE = 'officina-voce-v1';
 
 importScripts(ORT + 'ort.wasm.min.js', PHON + 'piper_phonemize.js');
@@ -11,6 +14,7 @@ ort.env.wasm.wasmPaths = ORT;
 ort.env.wasm.numThreads = 1;
 
 let session = null;
+let voice = 'paola';
 
 async function cachedFetch(url, onProgress) {
   let cache = null;
@@ -47,9 +51,10 @@ async function phonemize(text) {
   });
 }
 
-async function init() {
+async function init(v) {
+  if (v && v !== voice && VOICES[v]) { voice = v; session = null; }
   if (session) return;
-  const bytes = await cachedFetch(MODEL, (p) => postMessage({ type: 'progress', p }));
+  const bytes = await cachedFetch(VOICES[voice], (p) => postMessage({ type: 'progress', p }));
   session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
   await phonemize('ciao'); // scalda espeak (scarica i suoi dati)
 }
@@ -60,7 +65,7 @@ async function synth(text, lengthScale) {
   const out = await session.run({
     input: new ort.Tensor('int64', BigInt64Array.from(ids.map(BigInt)), [1, n]),
     input_lengths: new ort.Tensor('int64', BigInt64Array.from([BigInt(n)]), [1]),
-    scales: new ort.Tensor('float32', Float32Array.from([0.6, lengthScale, 0.8]), [3]),
+    scales: new ort.Tensor('float32', Float32Array.from([0.667, lengthScale, 0.8]), [3]),
   });
   return out[session.outputNames[0]].data;
 }
@@ -70,7 +75,7 @@ onmessage = (e) => { queue = queue.then(() => handle(e.data)); };
 
 async function handle(m) {
   try {
-    if (m.type === 'init') { await init(); postMessage({ type: 'ready' }); }
+    if (m.type === 'init') { await init(m.voice); postMessage({ type: 'ready' }); }
     if (m.type === 'synth') {
       await init();
       const audio = await synth(m.text, m.lengthScale || 1);

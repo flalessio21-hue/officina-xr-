@@ -16,6 +16,21 @@ export class NeuralVoice {
     this.onState = null;
     this.onEnd = null;
     this.worker = null;
+    try { this.voice = localStorage.getItem('officina-voce') || 'paola'; } catch { this.voice = 'paola'; }
+  }
+
+  /** Cambia voce (paola | miro): la nuova si scarica la prima volta. */
+  setVoice(v) {
+    this.voice = v;
+    try { localStorage.setItem('officina-voce', v); } catch { /* niente */ }
+    if (this.worker && this.state !== 'error') {
+      this.setState('loading');
+      this.loading = new Promise((resolve) => {
+        this.waiters.set('init', { resolve, reject: () => resolve(false) });
+        this.worker.postMessage({ type: 'init', voice: v });
+      });
+    }
+    return this.loading;
   }
 
   /** Va chiamata da un tocco dell'utente: sblocca l'audio e scarica la voce. */
@@ -48,7 +63,7 @@ export class NeuralVoice {
     this.setState('loading');
     this.loading = new Promise((resolve) => {
       this.waiters.set('init', { resolve, reject: () => resolve(false) });
-      this.worker.postMessage({ type: 'init' });
+      this.worker.postMessage({ type: 'init', voice: this.voice });
     });
     return this.loading;
   }
@@ -89,14 +104,15 @@ export class NeuralVoice {
   async speak(text, { pitch = 1 } = {}) {
     this.cancel();
     const gen = this.gen;
-    const rate = Math.min(1.35, Math.max(0.8, pitch));
+    const rate = 1; // niente alterazione del tono: la voce resta naturale
+    const lengthScale = Math.min(1.25, Math.max(0.8, 1 / Math.max(0.5, pitch)));
     const parts = text.replace(/\s+/g, ' ').match(/[^.!?;:]+[.!?;:]*/g)?.map((s) => s.trim()).filter(Boolean) || [text];
     this.nextTime = this.ctx.currentTime + 0.05;
     // tutte le frasi partono subito verso il worker; si riproducono in ordine
     const jobs = parts.map((p, i) => new Promise((resolve, reject) => {
       const id = `${gen}-${i}`;
       this.waiters.set(id, { resolve, reject });
-      this.worker.postMessage({ type: 'synth', id, text: p, lengthScale: rate });
+      this.worker.postMessage({ type: 'synth', id, text: p, lengthScale });
     }));
     let last = null;
     for (const job of jobs) {

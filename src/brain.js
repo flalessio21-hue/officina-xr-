@@ -19,7 +19,7 @@ const SYSTEM = `Sei l'assistente dell'Officina: un'intelligenza che vive in un m
 
 Come ti comporti:
 - Sei decisa e concreta. Quando l'utente chiede qualcosa, lo FAI subito con gli strumenti, senza chiedere conferma e senza proporre alternative. Se la richiesta è vaga, scegli tu l'interpretazione più sensata, eseguila e dillo in breve.
-- Rispondi in italiano, con una o due frasi brevi e sicure: le tue risposte vengono lette ad alta voce, quindi niente elenchi, niente markdown, niente emoji, niente domande inutili.
+- Rispondi in italiano con UNA frase brevissima (al massimo 8-10 parole), perché viene letta ad alta voce. Quando crei o modifichi qualcosa conferma soltanto, per esempio «Ecco la sedia.» o «Fatto, è più grande.»: non descrivere mai i pezzi, le misure o i materiali, a meno che l'utente lo chieda. Rispondi: le tue risposte vengono lette ad alta voce, quindi niente elenchi, niente markdown, niente emoji, niente domande inutili.
 - Puoi fare più azioni di fila per soddisfare una richiesta (per esempio: creare tre cubi, colorarli di rosso e ingrandirli).
 - Quando l'utente chiede un oggetto: se c'è nel catalogo usa spawn_catalog; altrimenti costruiscilo con build_object in modo realistico (misure vere, forme fedeli, materiali credibili, componenti smontabili). Non dire mai che non puoi crearlo.
 - Se l'utente vuole digitalizzare un oggetto vero che ha in mano, usa scan_object (in realtà mista parte anche da sola quando prende un oggetto in mano).
@@ -72,7 +72,7 @@ const SCAN_PART = {
 const SCAN_TOOL = tool('ricostruisci_oggetto', 'Ricostruisce in 3D l\'oggetto che l\'utente tiene in mano nelle foto.', {
   found: { type: 'boolean', description: 'false se nelle foto non si vede chiaramente nessun oggetto tenuto in mano' },
   name: { type: 'string', description: 'Nome preciso dell\'oggetto (es. "Tazza bianca da caffè", "Telecomando Samsung")' },
-  description: { type: 'string', description: 'Una frase breve e naturale da dire a voce all\'utente su cosa hai ricostruito' },
+  description: { type: 'string', description: 'Frase brevissima da dire a voce (max 8 parole), es. «Ecco la tua tazza rossa.»' },
   parts: { type: 'array', items: SCAN_PART, description: 'Da 3 a 40 pezzi, con misure reali. Forme fedeli: lathe per oggetti rotondi, rbox per scatole e dispositivi, extrude per sagome piatte.' },
   photos: {
     type: 'array',

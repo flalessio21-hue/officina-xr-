@@ -58,8 +58,8 @@ export const PANEL_TABS = [
     id: 'sistema', label: 'Sistema', color: '#7fe3ff', hint: 'Tutto resta salvato su questo visore. In VR tieni premuto A (o X) e parla.',
     buttons: [
       b('slot', 'Progetto 1'), b('save', 'Salva'), b('load', 'Apri'), b('new', 'Nuovo'),
-      b('talk', 'Parla (A)'), b('listenAlways', 'Ascolto: NO'), b('pitch+', 'Voce acuta'), b('pitch-', 'Voce grave'),
-      b('help', 'Aiuto'), b('clear', 'Svuota tutto'),
+      b('talk', 'Parla (A)'), b('listenAlways', 'Ascolto: NO'), b('voiceSwap', 'Cambia voce'), b('voiceSlow', 'Parla più piano'),
+      b('help', 'Aiuto'), b('diag', 'Diagnostica'), b('clear', 'Svuota tutto'),
     ],
   },
 ];
@@ -104,7 +104,8 @@ export function createActions(ctx) {
 
   function notify(msg, speak = false) {
     lastMsg = msg;
-    if (speak) ai.say(msg);
+    // l'aiuto e la spiegazione dei gesti si leggono per intero; il resto è una frase breve
+    if (speak) ai.say(msg, { full: msg === HELP || msg === GESTURES });
   }
   ai.onText = (t) => { lastMsg = t; };
 
@@ -308,6 +309,7 @@ export function createActions(ctx) {
     deskDown: () => moveDesk(-0.03),
     clear: () => (workspace.clear(), 'Scrivania ripulita.'),
     help: () => HELP,
+    diag: () => { Promise.resolve(ctx.diag?.()).then((m) => m && ai.say(m, { full: true })); return null; },
     home: () => (env.home?.(), 'Sei tornato alla scrivania.'),
     turnL: () => (env.turn?.(Math.PI / 6), null),
     turnR: () => (env.turn?.(-Math.PI / 6), null),
@@ -316,6 +318,17 @@ export function createActions(ctx) {
       if (!ctx.net?.room) return 'Per invitare qualcuno devi accedere: togli il visore e usa il riquadro «Il tuo account» nella pagina.';
       const others = Object.values(ctx.net.people).map((p) => p.name);
       return `Per invitare qualcuno, nella pagina del browser tocca «Invita qualcuno» e manda il link. ${others.length ? 'Ora qui ci sono: ' + others.join(', ') + '.' : 'Per ora sei da solo.'}`;
+    },
+    voiceSwap: () => {
+      const v = ai.neural?.voice === 'miro' ? 'paola' : 'miro';
+      if (!ai.neural) return 'Prima attiva la voce nella pagina iniziale.';
+      ai.neural.unlock();
+      ai.neural.setVoice(v)?.then(() => ai.say(v === 'miro' ? 'Ora sono Miro.' : 'Ora sono Paola.'));
+      return null;
+    },
+    voiceSlow: () => {
+      ai.neuralSpeed = (ai.neuralSpeed || 1) >= 1 ? 0.88 : 1;
+      return ai.neuralSpeed < 1 ? 'Parlo più piano.' : 'Torno alla velocità normale.';
     },
     'pitch+': () => (ai.changePitch(0.15), 'Ora parlo più acuto.'),
     'pitch-': () => (ai.changePitch(-0.15), 'Ora ho una voce più grave.'),
@@ -329,7 +342,7 @@ export function createActions(ctx) {
     return `Altezza scrivania: ${Math.round((0.75 + y) * 100)} cm.`;
   }
 
-  const SPOKEN = new Set(['sample', 'help', 'explodeAll', 'group', 'gestures', 'gravity', 'twohand']);
+  const SPOKEN = new Set(['voiceSlow', 'sample', 'help', 'explodeAll', 'group', 'gestures', 'gravity', 'twohand']);
 
   function run(id, { speak } = {}) {
     if (id.startsWith('tab:')) {
@@ -435,6 +448,11 @@ export function createActions(ctx) {
       const th = !isMake && (context || t.split(/\s+/).length <= 3) ? ThemeManager.fromText(t) : null;
       if (th) return run('theme:' + th, { speak: true });
     }
+    if (has(/diagnostic|cosa non (va|funziona)|perche non (scansion|funzion)/)) {
+      Promise.resolve(ctx.diag?.()).then((m) => m && ai.say(m, { full: true }));
+      return null;
+    }
+    if (has(/\b(stop|basta|ferma|annulla) (la )?scansion/) && ctx.scanCancel) { ctx.scanCancel(); return say('Scansione annullata.'); }
     if (has(/scansion|scanneriz|scanner|digitalizz|rendil[oa] virtual/)) {
       return FEATURES.claudeAI ? run('scan', { speak: true }) : say('La scansione degli oggetti arriverà più avanti.');
     }

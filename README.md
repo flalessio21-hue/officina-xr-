@@ -21,4 +21,4 @@ Il codice completo (anche l'app nativa per il Quest) è nel repository privato `
 
 - Volto dell'ologramma: modello Face Cap (Bannaflak), dagli esempi di three.js.
 - `@anthropic-ai/sdk` (Apache 2.0), transformers.js e ONNX Runtime (MIT), in `src/vendor/`.
-- Voce: Piper «Miro» it-IT di OpenVoiceOS (CC BY-NC-ND 4.0, uso personale), espeak-ng (GPL-3.0) via jsDelivr.
+- Voci: Piper «Paola» it-IT (rhasspy, dati CC0) e «Miro» it-IT (OpenVoiceOS, CC BY-NC-ND 4.0); espeak-ng (GPL-3.0) via jsDelivr.
