@@ -122,7 +122,7 @@ export class VoiceInput {
     this.chunks.push(new Float32Array(data));
     this.elapsed += dt;
     if (speech) { this.heard = true; this.silence = 0; } else this.silence += dt;
-    if ((this.heard && this.silence > 0.9) || this.elapsed > 9 || (!this.heard && this.elapsed > 5)) {
+    if ((this.heard && this.silence > 0.6) || this.elapsed > 9 || (!this.heard && this.elapsed > 5)) {
       this.recording = false;
       if (this.heard) this.transcribe();
       else if (!this.continuousTake) this.set('nothing', this.gotSignal ? 'quiet' : 'silent');

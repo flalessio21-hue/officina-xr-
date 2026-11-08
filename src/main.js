@@ -161,6 +161,24 @@ function setDeskVisible(v) {
   return v ? 'Scrivania visibile.' : 'Scrivania nascosta: gli oggetti restano dove sono.';
 }
 ctx.toggleDesk = () => setDeskVisible(!deskVisible);
+ctx.deskVisible = () => deskVisible;
+// il menu: nascondi, mostra, portalo davanti a te
+ctx.panelVisible = (v) => { panel.mesh.visible = v; };
+ctx.panelHere = () => {
+  panel.mesh.visible = true;
+  const { pos, fwd, right } = headPose();
+  const target = pos.clone().addScaledVector(fwd, 0.55).addScaledVector(right, -0.25);
+  target.y = pos.y - 0.15;
+  panel.mesh.position.copy(env.deskRig.worldToLocal(target.clone()));
+  panel.mesh.lookAt(pos);
+};
+// dalla realtà mista alla realtà virtuale
+ctx.virtualReality = () => {
+  const session = renderer.xr.getSession();
+  if (!mixedReality) return 'Sei già in realtà virtuale.';
+  session?.end().then(() => startSession('immersive-vr')).catch(() => {});
+  return null;
+};
 
 /** Aspetto del mondo in realtà mista: niente cielo, pavimento, nebbia e particelle. */
 function applyMixedLook(on) {
@@ -227,11 +245,10 @@ const brain = new Brain({
 /** Ogni comando (voce, testo, pannello «Parla con AI») passa da qui. */
 function command(text) {
   // scansione e diagnostica partono subito, senza passare da Claude
-  const quick = /scansion|scanneriz|diagnostic|cosa non (va|funziona)/i.test(text) || scanner.state === 'capturing';
-  // i comandi del menu (gravità, schede, pulsanti) partono subito, senza aspettare Claude
-  if (brain.enabled && !quick && actions.menu(text) !== undefined) return;
-  if (brain.enabled && !quick) brain.handle(text);
-  else actions.voice(text);
+  // prima i comandi locali (istantanei); Claude solo per quello che non capisco (è più lento)
+  if (!brain.enabled || scanner.state === 'capturing') { actions.hear(text); return; }
+  const UNHANDLED = Symbol('non capito');
+  if (actions.hear(text, { unhandled: UNHANDLED }) === UNHANDLED) brain.handle(text);
 }
 ai.onHeard = command;
 
@@ -553,6 +570,18 @@ ctx.power = (id) => {
 // comandi vocali con Whisper nel visore
 ctx.isMixedReality = () => mixedReality;
 const neural = new NeuralVoice();
+// piccolo suono di conferma: «ti ho sentito» (rende l'attesa meno lunga)
+function beep(freq, dur) {
+  const ctxA = neural.ctx;
+  if (!ctxA || ctxA.state !== 'running') return;
+  const o = ctxA.createOscillator(), g = ctxA.createGain();
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, ctxA.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.12, ctxA.currentTime + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, ctxA.currentTime + dur);
+  o.connect(g).connect(ctxA.destination);
+  o.start(); o.stop(ctxA.currentTime + dur + 0.02);
+}
 ai.neural = neural;
 neural.onState = (st, p) => {
   const el = document.getElementById('voice-status');
@@ -565,7 +594,8 @@ const voiceIn = new VoiceInput({
   onState: (st, info) => {
     ai.listening = st === 'listening' || st === 'thinking';
     if (st === 'listening') { ai.stopSpeaking?.(); ai.setSubtitle('🎤 Ti ascolto…'); }
-    if (st === 'thinking') ai.setSubtitle('Sto capendo…');
+    if (st === 'thinking') { ai.setSubtitle('Sto capendo…'); beep(880, 0.07); }
+    if (st === 'listening') beep(660, 0.05);
     if (st === 'nothing') ai.setSubtitle(info === 'silent' ? 'Il microfono non manda audio. Controlla i permessi del browser.' : 'Non ho sentito niente: tieni premuto A e parla più vicino.');
     if (st === 'error') ai.say('Ho perso il microfono. Tocca «Attiva voce» nella pagina iniziale.');
     const el = document.getElementById('voice-status');
@@ -601,7 +631,11 @@ ctx.voiceContinuous = (on) => {
     panel.setLabel('listenAlways', on ? 'Ascolto: SÌ' : 'Ascolto: NO');
     panel.setActive('listenAlways', on);
   };
-  if (!voiceIn.ready) { initVoice().then((ok) => ok && apply()); return 'Attivo il microfono…'; }
+  if (!voiceIn.ready) {
+    if (!on) return 'Ascolto continuo spento.';
+    initVoice().then((ok) => ok && apply());
+    return 'Attivo il microfono…';
+  }
   apply();
   return on ? 'Ti ascolto sempre: parla quando vuoi.' : 'Ascolto continuo spento.';
 };
@@ -681,6 +715,12 @@ renderer.xr.addEventListener('sessionstart', () => {
   setTimeout(async () => {
     if (!mixedReality) { ai.say('Ciao, sono qui sulla scrivania. Tieni premuto A e chiedimi quello che vuoi.'); return; }
     // in realtà mista controllo subito se la scansione può funzionare e dico cosa manca
+    if (ctx.pendingRealDesk) {
+      ctx.pendingRealDesk = false;
+      tableSnap.auto = true; tableSnap.cooldown = 0;
+      ai.say('Modalità scrivania reale: appoggia le mani aperte sul tuo tavolo e tienile ferme un secondo.');
+      return;
+    }
     const r = await scanner.readiness();
     ai.say(r.ok ? 'Vedo la tua stanza. Prendi un oggetto in mano, tienilo davanti agli occhi e giralo: lo scansiono in 3D.' : r.msg, { full: true });
   }, 900);

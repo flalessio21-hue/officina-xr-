@@ -27,6 +27,8 @@ const VOCAB = ['piovere', 'pioggia', 'nevicare', 'temporale', 'arcobaleno', 'neb
 const KEEP = new Set(['scomponi', 'scomponilo', 'scomponila', 'smontalo', 'smontala', 'esplodilo', 'esplodila', 'componi', 'scansionalo', 'cancellalo', 'eliminalo', 'ingrandiscilo', 'girala', 'giralo', 'spazzola', 'spazi', 'tramonta', 'pioggie', 'piove']);
 const FIX = { cre: 'crea', crei: 'crea', crep: 'crea', creo: 'crea', fammi: 'fammi', piove: 'piove' };
 export function fixTranscript(text) {
+  // «crea» sentito come «che è» / «create» / «crei» all'inizio della frase
+  text = norm(text).replace(/^(che e|ke e|create|crei|cre e|che a)\b/, 'crea');
   const w = norm(text).replace(/'/g, "' ").split(' ').filter(Boolean).map((x) => FIX[x] || x);
   const out = [];
   for (let i = 0; i < w.length; i++) {
@@ -109,7 +111,7 @@ export function findItem(t) {
   for (const [k, it] of entries) if (hasKeyword(t2, k)) return it;
   return null;
 }
-const NOT_ITEMS = new Set(['torna', 'porta', 'gira', 'giro', 'ruota', 'sposta', 'metti', 'vai', 'fai', 'usa', 'pausa', 'fatto', 'fatta', 'fatti', 'finito', 'pronto', 'basta', 'ecco', 'tutto', 'tutta', 'grazie', 'ciao', 'bravo', 'brava', 'perfetto', 'giusto', 'sotto', 'sopra', 'dentro', 'fuori', 'molto', 'tanto', 'quanto', 'questo', 'quello', 'quella', 'quelli']);
+const NOT_ITEMS = new Set(['copia', 'copiare', 'torna', 'porta', 'gira', 'giro', 'ruota', 'sposta', 'metti', 'vai', 'fai', 'usa', 'pausa', 'fatto', 'fatta', 'fatti', 'finito', 'pronto', 'basta', 'ecco', 'tutto', 'tutta', 'grazie', 'ciao', 'bravo', 'brava', 'perfetto', 'giusto', 'sotto', 'sopra', 'dentro', 'fuori', 'molto', 'tanto', 'quanto', 'questo', 'quello', 'quella', 'quelli']);
 
 const LIB_WORDS = {
   drone: ['drone', 'quadricottero'], engine: ['motore', 'pistone'], gearbox: ['riduttore', 'cambio', 'scatola ingranaggi'],
@@ -121,3 +123,47 @@ const LIB_WORDS = {
 
 /** Verbi che indicano "togli/elimina" (per non creare per sbaglio). */
 export const REMOVE = /\b(elimina|cancella|togli|rimuovi|butta|distruggi|leva|fai sparire|via)\b/;
+
+// ---------------------------------------------------------------------------------------------
+// Correttore di comandi: la trascrizione vocale spesso storpia le parole ("e l'imina è chuba").
+// Confronto il SUONO della frase sentita con tutte le frasi di comando che l'app conosce e
+// scelgo la più somigliante, se lo è abbastanza.
+
+/** Chiave "fonetica" italiana: come suona, non come si scrive. */
+export function phonetic(s) {
+  return norm(s).replace(/['\s]/g, '')
+    .replace(/ch/g, 'k').replace(/c([aou])/g, 'k$1').replace(/q/g, 'k').replace(/gn/g, 'n').replace(/gl/g, 'l')
+    .replace(/sc([ei])/g, 'x$1').replace(/h/g, '').replace(/z/g, 's').replace(/y/g, 'i').replace(/v/g, 'b')
+    .replace(/(.)\1+/g, '$1');
+}
+
+function levFull(a, b) {
+  const m = a.length, n = b.length;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+
+let PHRASES = null;
+/** phrases: elenco di frasi di comando canoniche (testo). */
+export function setCommandPhrases(list) {
+  PHRASES = [...new Set(list)].map((p) => ({ text: p, key: phonetic(p) }));
+}
+
+/** La frase di comando più vicina a quello che è stato sentito: { text, score } (score 0..1). */
+export function matchCommand(heard) {
+  if (!PHRASES) return null;
+  const k = phonetic(heard);
+  if (k.length < 3) return null;
+  let best = null, bs = 0;
+  for (const p of PHRASES) {
+    if (Math.abs(p.key.length - k.length) > Math.max(4, k.length * 0.45)) continue;
+    const sc = 1 - levFull(k, p.key) / Math.max(k.length, p.key.length);
+    if (sc > bs) { bs = sc; best = p; }
+  }
+  return best ? { text: best.text, score: bs } : null;
+}

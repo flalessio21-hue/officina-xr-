@@ -2,14 +2,53 @@ import { THEMES, ThemeManager } from './themes.js';
 
 import { LIBRARY } from './library.js';
 import { FEATURES } from './features.js';
-import { CATALOG } from './catalog.js';
-import { norm, hasKeyword, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE, fixTranscript } from './intent.js';
+import { CATALOG, ALL_ITEMS } from './catalog.js';
+import { norm, hasKeyword, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE, fixTranscript, matchCommand, setCommandPhrases } from './intent.js';
 
 const b = (id, label) => ({ id, label });
 
 // stato del menu Oggetti: categoria scelta e misura con cui creare
 export const objectMenu = { cat: 'tech', size: 'auto' };
 const SIZE_LABEL = { auto: 'Misura: AUTO', mini: 'Misura: MINI', real: 'Misura: REALE', giant: 'Misura: GIGANTE' };
+
+// Frasi di comando "canoniche": servono al correttore che ripara le parole storpiate dalla voce.
+const FIXED_COMMANDS = [
+  'attiva la gravità', 'disattiva la gravità', 'accendi la gravità', 'spegni la gravità', 'togli la gravità', 'metti la gravità',
+  'cancella tutto', 'elimina tutto', 'svuota la scrivania', 'annulla', 'ripeti', 'rifai', 'duplica', 'duplicalo', 'copia',
+  'ingrandisci', 'rimpicciolisci', 'più grande', 'più piccolo', 'fallo grande il doppio', 'fallo piccolo la metà', 'misura originale',
+  'ruota', 'ruotalo di novanta gradi', 'giralo a destra', 'giralo a sinistra', 'capovolgi', 'capovolgilo',
+  'spostalo a destra', 'spostalo a sinistra', 'spostalo avanti', 'spostalo indietro', 'alzalo', 'abbassalo',
+  'portamelo', 'dammelo', 'rimettilo sulla scrivania', 'seleziona tutto', 'deseleziona', 'raggruppa', 'separa',
+  'smonta', 'smonta tutto', 'esplodi', 'esplodi tutto', 'ricomponi', 'ricomponi tutto', 'rimonta tutto', 'estrai il pezzo',
+  'scomponi quello che ho in mano', 'smontalo',
+  'portami nello spazio', 'andiamo sott\'acqua', 'portami al tramonto', 'aurora boreale', 'torna al buio',
+  'fai piovere', 'fai piovere sopra di me', 'fai nevicare', 'temporale', 'nebbia', 'arcobaleno', 'sereno', 'smetti di piovere',
+  'accendi la luce', 'spegni la luce', 'accendi la lampada', 'spegni la lampada',
+  'attiva la realtà mista', 'realtà mista', 'torna in realtà virtuale', 'realtà virtuale',
+  'modalità scrivania reale', 'usa il mio tavolo', 'torna alla scrivania virtuale',
+  'alza la scrivania', 'abbassa la scrivania', 'rimetti a posto la scrivania', 'nascondi la scrivania', 'mostra la scrivania', 'torna alla scrivania',
+  'parla più piano', 'parla più veloce', 'stai zitta', 'silenzio', 'cambia voce', 'ripeti quello che hai detto', 'cosa hai detto',
+  'ascoltami sempre', 'smetti di ascoltare',
+  'salva', 'salva il progetto', 'carica il progetto', 'apri il progetto', 'nuovo progetto',
+  'aiuto', 'cosa posso dire', 'diagnostica', 'che ore sono', 'che giorno è',
+  'nascondi il menu', 'mostra il menu', 'porta qui il menu', 'apri la scheda crea', 'apri la scheda mondo', 'apri la scheda sistema', 'apri la scheda smonta', 'apri la scheda modifica',
+  'scansiona', 'scansiona questo oggetto', 'fatto', 'annulla la scansione',
+  'quanto è grande', 'quanto misura', 'cosa c\'è sulla scrivania', 'quanti pezzi ha',
+  'colora di rosso', 'colora di blu', 'colora di verde', 'colora di giallo', 'colora di bianco', 'colora di nero',
+];
+let PHRASES_READY = false;
+export function commandPhrases() {
+  const out = [...FIXED_COMMANDS];
+  const words = new Set();
+  for (const it of [...ALL_ITEMS, ...LIBRARY.map((l) => ({ label: l.label, words: [l.label] }))]) {
+    for (const w of [it.label, ...(it.words || []).slice(0, 2)]) words.add(w.toLowerCase());
+  }
+  for (const w of words) {
+    out.push(`crea un ${w}`, `crea una ${w}`, `fammi un ${w}`, `fammi una ${w}`, `elimina il ${w}`, `elimina la ${w}`,
+      `smonta il ${w}`, `esplodi il ${w}`, `dammi il ${w}`, `dammi la ${w}`, `carica il ${w}`);
+  }
+  return out;
+}
 
 /** Il pannello a sinistra della scrivania, diviso in schede. */
 export const PANEL_TABS = [
@@ -51,7 +90,7 @@ export const PANEL_TABS = [
       b('theme:buio', 'Studio'), b('theme:spazio', 'Spazio'), b('theme:acqua', "Sott'acqua"), b('theme:tramonto', 'Tramonto'),
       b('theme:aurora', 'Aurora'), b('mr', 'Realtà mista'), b('gravity', 'Gravità: NO'), b('lamp', 'Lampada'),
       b('w:rain', 'Pioggia'), b('w:snow', 'Neve'), b('w:storm', 'Temporale'), b('w:clear', 'Sereno'),
-      b('deskReset', 'Scrivania a posto'), b('home', 'Torna qui'), b('deskToggle', 'Scrivania: SÌ'),
+      b('deskReset', 'Scrivania a posto'), b('home', 'Torna qui'), b('deskToggle', 'Scrivania: SÌ'), b('realDesk', 'Scrivania reale'),
     ],
   },
   {
@@ -75,8 +114,8 @@ const GESTURES = 'Per smontare: fai un doppio pizzico su un oggetto per aprirlo,
 const HELP = 'Tieni premuto A e parla. Puoi chiedermi un oggetto, per esempio una sedia o una pizza. '
   + 'Puoi dire: dammi la pizza, ruotala di 90 gradi, spostala a destra di 20 centimetri, falla alta 30 centimetri, duplica 3 volte, rimettila sulla scrivania. '
   + 'Se tieni un oggetto in mano, di\' scomponi quello che ho in mano e potrai prendere i pezzi uno alla volta. '
-  + 'Puoi comandare tutto il menu: attiva la gravità, apri la scheda mondo, esplodi tutto, salva. '
-  + 'In realtà mista appoggia le mani aperte sul tuo tavolo: diventa la scrivania. Prendi un oggetto vero e di\' scansiona. Per spostare la scrivania prendi le maniglie luminose sul bordo.';
+  + 'Puoi comandare tutto il menu: attiva o disattiva la gravità, apri la scheda mondo, nascondi il menu, porta qui il menu, esplodi tutto, salva, nuovo progetto, parla più veloce. '
+  + 'Di\' modalità scrivania reale e appoggia le mani aperte sul tuo tavolo: diventa il piano di lavoro. Prendi un oggetto vero e di\' scansiona. Per spostare la scrivania prendi le maniglie luminose sul bordo.';
 
 const COLORS = {
   ross: 0xff4a3d, blu: 0x4f8cff, azzurr: 0x7fc8ff, verd: 0x45d483, giall: 0xffc845, viola: 0xb57bff,
@@ -109,7 +148,16 @@ export function createActions(ctx) {
   }
   ai.onText = (t) => { lastMsg = t; };
 
-  const need = (fn, msg = 'Prima seleziona qualcosa.') => (workspace.selected.size ? fn() : msg);
+  // se non hai selezionato niente, si agisce sull'ultimo oggetto creato (è quasi sempre quello che intendi)
+  const need = (fn, msg = 'Prima crea qualcosa.') => {
+    if (!workspace.selected.size) {
+      const last = workspace.topLevel().at(-1);
+      if (!last) return msg;
+      workspace.selected = new Set([last]);
+      workspace.highlightDirty = true;
+    }
+    return fn();
+  };
 
   // ---------- annulla / ripeti: istantanee del mondo dopo ogni modifica ----------
   const history = { past: [], future: [], seen: workspace.version || 0, quiet: 0, restoring: false };
@@ -304,7 +352,8 @@ export function createActions(ctx) {
       return on ? 'Gravità attiva: gli oggetti cadono, si appoggiano e puoi lanciarli.' : 'Gravità spenta: gli oggetti restano sospesi dove li lasci.';
     },
     export: exportGLB,
-    deskReset: () => (ctx.deskGrab?.reset(), 'Scrivania rimessa al suo posto.'),
+    deskReset: () => (ctx.setRealTable?.(false), ctx.deskGrab?.reset(), 'Scrivania rimessa al suo posto.'),
+    realDesk: () => voice('modalita scrivania reale'),
     deskUp: () => moveDesk(0.03),
     deskDown: () => moveDesk(-0.03),
     clear: () => (workspace.clear(), 'Scrivania ripulita.'),
@@ -409,12 +458,12 @@ export function createActions(ctx) {
   // ---- tutto il menu a voce ----
   const say = (m) => { if (m) notify(m, true); return m; };
   const ON = /\b(attiva|accendi|abilita|avvia|metti|inserisci|si)\b/;
-  const OFF = /\b(disattiva|spegni|disabilita|togli|leva|ferma|blocca|no|niente|senza)\b/;
+  const OFF = /\b(disattiva|spegni|disabilita|togli|leva|ferma|blocca|no|niente|senza|smetti|basta|stop|chiudi)\b/;
   // pulsanti con uno stato acceso/spento: come leggere lo stato e come cambiarlo
   const TOGGLES = {
     gravity: { name: ['La gravità', 'attiva', 'spenta'], words: ['gravita'], get: () => !!ctx.physics?.enabled, set: () => run('gravity', { speak: true }) },
     listenAlways: { name: ['L\'ascolto continuo', 'attivo', 'spento'], words: ['ascolto', 'ascoltami sempre', 'ascolto continuo'], get: () => !!ctx.voiceIn?.continuous, set: (on) => say(ctx.voiceContinuous?.(on) || '') },
-    deskToggle: { name: ['La scrivania', 'visibile', 'nascosta'], words: ['scrivania'], get: () => env.deskTop.visible, set: () => say(ctx.toggleDesk?.() || '') },
+    deskToggle: { name: ['La scrivania', 'visibile', 'nascosta'], words: ['scrivania'], get: () => ctx.deskVisible?.() ?? env.deskTop.visible, set: () => say(ctx.toggleDesk?.() || '') },
     multi: { name: ['La selezione multipla', 'attiva', 'spenta'], words: ['selezione multipla', 'multi'], get: () => multi, set: () => run('multi', { speak: true }) },
     mr: { name: ['La realtà mista', 'attiva', 'spenta'], words: ['realta mista', 'passthrough', 'passtrough', 'vedere la stanza', 'la mia stanza'], get: () => !!ctx.isMixedReality?.(), set: () => run('mr', { speak: true }) },
     lamp: { name: ['La lampada', 'accesa', 'spenta'], words: ['lampada', 'luce'], get: () => env.lampOn?.() ?? null, set: () => run('lamp', { speak: true }) },
@@ -459,6 +508,8 @@ export function createActions(ctx) {
       if (early && /^(lib|obj|cat):/.test(b.id)) continue;
       const words = cleanLabel(b.label).split(' ').filter((w) => w.length > 2 || /^(su|giu|piu)$/.test(w));
       if (!words.length || (early && words.length < 2)) continue;
+      // il nome del pulsante deve essere quasi tutta la frase (non una parola presa a caso)
+      if (t.split(' ').filter((w) => w.length > 2).length > words.length + 1) continue;
       if (words.every((w) => hasKeyword(t, w, early)) && words.join(' ').length > bestLen) { best = b; bestLen = words.join(' ').length; }
     }
     if (best) {
@@ -469,7 +520,7 @@ export function createActions(ctx) {
   }
 
   // ---- comandi in più: oggetto in mano, spostamenti precisi, misure, elenco, ora… ----
-  const NUMW = { un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, venti: 20, trenta: 30, quaranta: 40, cinquanta: 50, cento: 100, mezzo: 0.5 };
+  const NUMW = { un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, venti: 20, trenta: 30, quaranta: 40, quarantacinque: 45, cinquanta: 50, sessanta: 60, settanta: 70, ottanta: 80, novanta: 90, cento: 100, centoventi: 120, centottanta: 180, duecentosettanta: 270, trecentosessanta: 360, mezzo: 0.5 };
   const numberIn = (t, re) => {
     const m = t.match(re);
     if (!m) return null;
@@ -486,6 +537,35 @@ export function createActions(ctx) {
   }
 
   function moreCommands(t, has, say, item) {
+    // modalità scrivania reale: il tavolo vero diventa il piano di lavoro
+    if (has(/modalita (scrivania|tavolo) (reale|vera)|scrivania reale|tavolo reale/)) {
+      if (!ctx.isMixedReality?.()) { ctx.pendingRealDesk = true; ctx.mixedReality?.(); return say('Passo alla realtà mista: poi appoggia le mani aperte sul tuo tavolo.'); }
+      if (ctx.tableSnap) { ctx.tableSnap.auto = true; ctx.tableSnap.cooldown = 0; }
+      return say('Appoggia le mani aperte sul tavolo e tienile ferme un secondo.');
+    }
+    // realtà virtuale (uscire dalla realtà mista)
+    if (has(/(torna|passa|vai|ritorna)\w* (in|alla|nella) realta virtuale|^realta virtuale$|esci dalla realta mista|niente realta mista/)) { ctx.virtualReality?.(); return say('Torno alla realtà virtuale.'); }
+    // il menu
+    if (has(/\b(menu|pannello)\b/)) {
+      if (has(/nascondi|togli|chiudi|leva/)) { ctx.panelVisible?.(false); return say('Menu nascosto. Di\' «mostra il menu» per riaverlo.'); }
+      if (has(/porta|avvicina|qui|vicino/)) { ctx.panelHere?.(); return say('Ecco il menu.'); }
+      if (has(/mostra|apri|fai vedere|rimetti/) && !has(/scheda/)) { ctx.panelVisible?.(true); return say('Ecco il menu.'); }
+    }
+    // voce
+    if (has(/parla (piu )?(veloce|svelt|rapid)|piu veloce a parlare/)) { ai.neuralSpeed = 1.15; return say('Parlo più veloce.'); }
+    if (has(/(smetti|basta|stop|non) (di )?ascoltar|spegni (il )?microfono|ascolto (spento|no)/)) return say(ctx.voiceContinuous?.(false) || 'Non ti ascolto più di continuo: tieni premuto A per parlarmi.');
+    // progetti
+    if (has(/\b(apri|carica|riapri)\b.*\bprogett/)) return run('load', { speak: true });
+    // misure relative
+    if (has(/\b(doppio|due volte piu grande|raddoppia)\b/)) return need(() => { run('s*2', { speak: false }); return say('Grande il doppio.'); });
+    if (has(/\b(meta|dimezza)\b/) && has(/fall|rend|piccol|dimezza/)) return need(() => { run('s/2', { speak: false }); return say('Ora è grande la metà.'); });
+    if (has(/\b(alzalo|alzala|sollevalo|sollevala)\b/)) { const n = targetNodes(item); if (!n.length) return say('Non c\'è niente da alzare.'); ctx.moveNodes?.(n, 'up', 0.15); return say('Alzato.'); }
+    if (has(/\b(abbassalo|abbassala)\b/)) { const n = targetNodes(item); if (!n.length) return say('Non c\'è niente da abbassare.'); ctx.moveNodes?.(n, 'down', 0.1); return say('Abbassato.'); }
+    if (has(/\b(portamelo|portamela|dammelo|dammela|passamelo|passamela|avvicinalo|avvicinala)\b/)) { const n = targetNodes(item); if (!n.length) return say('Non c\'è niente da portarti.'); ctx.bringToMe?.(n[0]); return say('Eccolo.'); }
+    if (has(/(rimettil[oa]|riportal[oa]|appoggial[oa]|posal[oa])\b/)) { const n = targetNodes(item); if (!n.length) return say('Non c\'è niente da rimettere.'); for (const x of n) workspace.placeOnDesk(x); workspace.markDirty(); return say('Rimesso sulla scrivania.'); }
+    // quanti pezzi
+    if (has(/quanti (pezzi|componenti|parti)/)) { const n = targetNodes(item)[0]; return say(n ? `${n.name} ha ${workspace.countParts?.(n) ?? 1} pezzi.` : 'Non c\'è niente sulla scrivania.'); }
+    if (has(/^(fatto|ok|okay|va bene|perfetto|grazie)$/)) return say('Ok.');
     // il tavolo vero diventa la scrivania (realtà mista)
     if (has(/\b(usa|adatta|aggancia|allinea)\b.*\b(tavolo|piano|scrivania)\b|\b(mio|questo|vero) (tavolo|piano)\b|tavolo vero/) && !has(/\b(crea|creami|fammi|costruisci|genera)\b/)) {
       if (!ctx.isMixedReality?.()) return say('Funziona in realtà mista: entra e appoggia le mani aperte sul tuo tavolo.');
@@ -546,6 +626,7 @@ export function createActions(ctx) {
         workspace.markDirty();
         return say(`Ruotato di ${Math.abs(deg)} gradi.`);
       }
+      if (has(/\b(ruotalo|ruotala|giralo|girala)\b/)) return need(() => run('rotate', { speak: true }));
     }
 
     // sposta a destra/sinistra/avanti/indietro/su/giù (di N centimetri)
@@ -597,7 +678,7 @@ export function createActions(ctx) {
     return undefined;
   }
 
-  function voice(raw) {
+  function voice(raw, opts = {}) {
     const t = norm(fixTranscript(raw));
     const has = (re) => re.test(t);
     // durante la scansione, «fatto» la chiude e crea l'oggetto
@@ -608,10 +689,10 @@ export function createActions(ctx) {
     const local = has(/(sopra di me|su di me|addosso|sulla (mia )?testa|qui sopra|solo su di me)/);
 
     if (has(/\b(ciao|salve|buongiorno|buonasera|hey|ehi)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa creiamo oggi?');
-    const early = t.split(' ').length <= 7 ? menuVoice(t, { early: true }) : undefined;
-    if (early !== undefined) return early;
     const more = moreCommands(t, has, say, item);
     if (more !== undefined) return more;
+    const early = t.split(' ').length <= 7 ? menuVoice(t, { early: true }) : undefined;
+    if (early !== undefined) return early;
     if (has(/chi sei|come ti chiami/)) return say('Sono la tua assistente. In questo mondo posso creare qualsiasi cosa del catalogo, cambiare il tempo e l’ambiente, e smontare tutto.');
     if (has(/aiuto|cosa (sai|puoi) fare|come funziona|cosa posso (fare|dire)/)) return say(HELP);
     if (has(/voce|parla/) && has(/acut|sottil|stridul/)) return run('pitch+', { speak: true });
@@ -702,7 +783,7 @@ export function createActions(ctx) {
     if (has(/lampada|accendi la luce|spegni la luce/)) return run('lamp', { speak: true });
     if (has(/quanto (e|misura)|dimensioni|misure/)) return say(workspace.info().replace(/×/g, 'per').replace(/mm/, 'millimetri'));
     if (has(/colore|colora|dipingi|vernicia/)) {
-      if (!workspace.selected.size) return say('Dimmi cosa colorare, per esempio: colora il maiale di blu.');
+      if (!workspace.selected.size) { const last = workspace.topLevel().at(-1); if (!last) return say('Prima crea qualcosa da colorare.'); workspace.selected = new Set([last]); }
       const c = colorIn(t);
       workspace.colorSelected(c);
       return say(c != null ? 'Fatto, nuovo colore.' : 'Ho cambiato colore.');
@@ -712,6 +793,8 @@ export function createActions(ctx) {
     const shape = SHAPES.find(([, re]) => re.test(t));
     if (shape) return run(shape[0], { speak: true });
     const m = t.match(/\b(crea|creami|fammi|fai|metti|mettimi|aggiungi|genera|costruisci|evoca|voglio|dammi|disegna|materializza|appari)\b\s+(?:un |uno |una |un'|il |lo |la |dei |delle |degli |i |gli |le )?(\w+)/);
+    // non capito: con Claude collegato ci pensa lui (vedi command() in main.js)
+    if (opts.unhandled) return opts.unhandled;
     if (m) return say(`«${m[2]}» non è tra i miei oggetti pronti. Inserisci la chiave di Claude nella pagina iniziale e potrò costruire qualsiasi cosa; intanto guarda la scheda Crea.`);
     return say('Non ho capito bene: ripetilo in un altro modo.');
   }
@@ -719,6 +802,22 @@ export function createActions(ctx) {
   return {
     run,
     voice,
+    /**
+     * Comando detto a voce: ripara le parole storpiate dal riconoscimento.
+     * 1) quasi identico a un comando noto → quel comando; 2) altrimenti la frase così com'è;
+     * 3) se non la capisco, il comando che le somiglia di più; 4) altrimenti non capito (o Claude).
+     */
+    hear(raw, opts = {}) {
+      PHRASES_READY ||= (setCommandPhrases(commandPhrases()), true);
+      const t = fixTranscript(raw);
+      const m = matchCommand(t);
+      if (m && m.score >= 0.86 && norm(m.text) !== norm(t)) return voice(m.text, opts);
+      const NO = Symbol('no');
+      const r = voice(t, { unhandled: NO });
+      if (r !== NO) return r;
+      if (m && m.score >= 0.6) { ai.setSubtitle(`Ho capito: «${m.text}»`); return voice(m.text, opts); }
+      return opts.unhandled || voice(t);
+    },
     /** Comando del menu riconosciuto con sicurezza (usato prima di chiedere a Claude). */
     menu: (raw) => {
       const t = norm(fixTranscript(raw));
