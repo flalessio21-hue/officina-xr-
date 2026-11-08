@@ -14,6 +14,8 @@ e ti ascolta, oggetti da creare e smontare, e la **scansione automatica** degli 
 In VR tieni premuto **A** (o X) e parla. In **realtà mista** prendi un oggetto vero, tienilo davanti agli occhi,
 di' «scansiona» e giralo piano (i puntini verdi sono ciò che vede); poi di' «fatto»: il sensore di profondità del Quest 3 lo scansiona in 3D (senza chiavi) e la copia compare sulla scrivania.
 
+In **realtà mista** appoggia le mani aperte sul tuo tavolo vero per un secondo: diventa la scrivania (gli oggetti ci si appoggiano sopra).
+
 Il codice completo (anche l'app nativa per il Quest) è nel repository privato `metaquest`.
 
 ## Crediti

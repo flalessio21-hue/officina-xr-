@@ -8,6 +8,7 @@ import { VoiceInput } from './voice-input.js';
 import { NeuralVoice } from './tts.js';
 import { DeskGrab } from './desk-grab.js';
 import { Scanner } from './scanner.js';
+import { TableSnap } from './table-snap.js';
 import { AIOrb } from './ai.js';
 import { Workspace } from './workspace.js';
 import { Panel } from './panel.js';
@@ -181,7 +182,7 @@ async function startSession(mode) {
   const init = { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] };
   if (mode === 'immersive-ar') {
     // sensore di profondità del Quest 3: serve alla scansione 3D degli oggetti veri
-    init.optionalFeatures.push('depth-sensing');
+    init.optionalFeatures.push('depth-sensing', 'plane-detection');
     init.depthSensing = { usagePreference: ['gpu-optimized', 'cpu-optimized'], dataFormatPreference: ['float32', 'luminance-alpha', 'unsigned-short'] };
   }
   const session = await navigator.xr.requestSession(mode, init);
@@ -239,6 +240,29 @@ const xrInput = new XRInput(renderer, scene, rig, camera, { panel, workspace, ac
 const deskGrab = new DeskGrab(env);
 xrInput.desk = deskGrab;
 ctx.deskGrab = deskGrab;
+
+// tavolo vero = scrivania: la scrivania diventa invisibile ma resta un piano su cui appoggiare
+// gli oggetti (e dietro cui spariscono), e il proiettore con la bolla resta sopra
+let realTable = false;
+function setRealTable(on) {
+  realTable = on;
+  for (const c of env.deskRig.children) {
+    if (c === env.workspaceRoot || c === panel.mesh || c.isLight || c === hologram.root || c === env.deskTop || c.name === 'maniglia-scrivania') continue;
+    if (c.type === 'Object3D') continue;
+    c.visible = !on;
+  }
+  env.deskTop.material.colorWrite = !on;
+  env.deskTop.renderOrder = on ? -1 : 0;
+  env.deskTop.castShadow = !on;
+  env.deskTop.material.needsUpdate = true;
+  if (physics.enabled) physics.buildStatic();
+}
+ctx.setRealTable = setRealTable;
+const tableSnap = new TableSnap({
+  xrInput, camera, deskGrab, env, ai, renderer, physics,
+  isMixedReality: () => mixedReality, setRealTable,
+});
+ctx.tableSnap = tableSnap;
 const scanner = new Scanner({
   scene, camera, xrInput, headsetCamera: camera3, brain, ai, actions, workspace,
   isMixedReality: () => mixedReality,
@@ -663,6 +687,7 @@ renderer.xr.addEventListener('sessionstart', () => {
 });
 renderer.xr.addEventListener('sessionend', () => {
   controls.enabled = true;
+  if (realTable) setRealTable(false);
   xrInput.home();
   applyMixedLook(false);
 });
@@ -693,6 +718,7 @@ renderer.setAnimationLoop(() => {
 
   xrInput.update(dt);
   scanner.update(dt);
+  if (scanner.state === 'idle') tableSnap.update(dt);
   workspace.update(dt);
   const viewCam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
   hologram.root.getWorldPosition(_hv);
@@ -743,4 +769,4 @@ renderer.setAnimationLoop(() => {
 });
 
 setTimeout(() => themes.prewarm(renderer, camera), 1500);
-window.officina = { bubble, renderer, scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
+window.officina = { tableSnap, bubble, renderer, scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };

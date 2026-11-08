@@ -76,7 +76,7 @@ const HELP = 'Tieni premuto A e parla. Puoi chiedermi un oggetto, per esempio un
   + 'Puoi dire: dammi la pizza, ruotala di 90 gradi, spostala a destra di 20 centimetri, falla alta 30 centimetri, duplica 3 volte, rimettila sulla scrivania. '
   + 'Se tieni un oggetto in mano, di\' scomponi quello che ho in mano e potrai prendere i pezzi uno alla volta. '
   + 'Puoi comandare tutto il menu: attiva la gravità, apri la scheda mondo, esplodi tutto, salva. '
-  + 'In realtà mista prendi un oggetto vero e di\' scansiona. Per spostare la scrivania prendi le maniglie luminose sul bordo.';
+  + 'In realtà mista appoggia le mani aperte sul tuo tavolo: diventa la scrivania. Prendi un oggetto vero e di\' scansiona. Per spostare la scrivania prendi le maniglie luminose sul bordo.';
 
 const COLORS = {
   ross: 0xff4a3d, blu: 0x4f8cff, azzurr: 0x7fc8ff, verd: 0x45d483, giall: 0xffc845, viola: 0xb57bff,
@@ -486,6 +486,17 @@ export function createActions(ctx) {
   }
 
   function moreCommands(t, has, say, item) {
+    // il tavolo vero diventa la scrivania (realtà mista)
+    if (has(/\b(usa|adatta|aggancia|allinea)\b.*\b(tavolo|piano|scrivania)\b|\b(mio|questo|vero) (tavolo|piano)\b|tavolo vero/) && !has(/\b(crea|creami|fammi|costruisci|genera)\b/)) {
+      if (!ctx.isMixedReality?.()) return say('Funziona in realtà mista: entra e appoggia le mani aperte sul tuo tavolo.');
+      if (ctx.tableSnap) { ctx.tableSnap.auto = true; ctx.tableSnap.cooldown = 0; }
+      return say('Appoggia le mani aperte sul tavolo e tienile ferme un secondo.');
+    }
+    if (has(/scrivania (virtuale|finta|di prima)|togli il tavolo|non (usare|adattare)( il)? tavolo/)) {
+      ctx.setRealTable?.(false);
+      if (ctx.tableSnap) ctx.tableSnap.auto = !has(/non (usare|adattare)/);
+      return say('Ecco di nuovo la scrivania virtuale.');
+    }
     // smetti di parlare / ripeti / ora
     if (has(/\b(zitta|zitto|silenzio|basta parlare|smetti di parlare|stai zitt)/)) { ai.stopSpeaking?.(); return null; }
     if (has(/cosa hai detto|ripeti (quello|cosa|l'ultima)|non ho sentito/)) return say(lastMsg);
@@ -592,7 +603,8 @@ export function createActions(ctx) {
     // durante la scansione, «fatto» la chiude e crea l'oggetto
     if (ctx.scanActive?.() && has(/\b(fatto|finito|ho finito|basta|stop|pronto|ecco|ok|vai|crealo|termina)\b/)) { ctx.scanFinish(); return null; }
     const say = (m) => { if (m) notify(m, true); return m; };
-    const item = findItem(t);
+    // «sul tavolo», «sulla scrivania» dicono dove, non cosa
+    const item = findItem(t.replace(/\b(sul|sulla|al|alla|nel|nella|dal|dalla|sopra il|sopra la)\s+(tavolo|scrivania|piano)\b/g, ' '));
     const local = has(/(sopra di me|su di me|addosso|sulla (mia )?testa|qui sopra|solo su di me)/);
 
     if (has(/\b(ciao|salve|buongiorno|buonasera|hey|ehi)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa creiamo oggi?');
@@ -676,7 +688,7 @@ export function createActions(ctx) {
     if (has(/esporta/)) return run('export', { speak: true });
     if (has(/ingrandisci|piu grande|allarga tutto/)) return run('s+', { speak: true });
     if (!item && has(/\bscrivania\b/)) {
-      if (has(/rimetti|riporta|a posto|come prima|iniziale|reset/)) { ctx.deskGrab?.reset(); return say('Scrivania rimessa al suo posto.'); }
+      if (has(/rimetti|riporta|a posto|come prima|iniziale|reset/)) { ctx.setRealTable?.(false); ctx.deskGrab?.reset(); return say('Scrivania rimessa al suo posto.'); }
       if (has(/\balza|\bsu\b|piu alt/)) return say(moveDesk(0.05));
       if (has(/abbassa|\bgiu\b|piu bass/)) return say(moveDesk(-0.05));
       if (has(/sposta|muovi|gira|ruota|prendi|avvicina/)) return say('Prendi una delle due maniglie luminose sul bordo davanti e trascinala: con due mani la puoi anche girare.');

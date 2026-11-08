@@ -109,7 +109,7 @@ export function findItem(t) {
   for (const [k, it] of entries) if (hasKeyword(t2, k)) return it;
   return null;
 }
-const NOT_ITEMS = new Set(['fatto', 'fatta', 'fatti', 'finito', 'pronto', 'basta', 'ecco', 'tutto', 'tutta', 'grazie', 'ciao', 'bravo', 'brava', 'perfetto', 'giusto', 'sotto', 'sopra', 'dentro', 'fuori', 'molto', 'tanto', 'quanto', 'questo', 'quello', 'quella', 'quelli']);
+const NOT_ITEMS = new Set(['torna', 'porta', 'gira', 'giro', 'ruota', 'sposta', 'metti', 'vai', 'fai', 'usa', 'pausa', 'fatto', 'fatta', 'fatti', 'finito', 'pronto', 'basta', 'ecco', 'tutto', 'tutta', 'grazie', 'ciao', 'bravo', 'brava', 'perfetto', 'giusto', 'sotto', 'sopra', 'dentro', 'fuori', 'molto', 'tanto', 'quanto', 'questo', 'quello', 'quella', 'quelli']);
 
 const LIB_WORDS = {
   drone: ['drone', 'quadricottero'], engine: ['motore', 'pistone'], gearbox: ['riduttore', 'cambio', 'scatola ingranaggi'],
