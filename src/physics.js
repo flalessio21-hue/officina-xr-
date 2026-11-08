@@ -122,7 +122,7 @@ export class Physics {
 
   /** Il nodo deve seguire chi lo muove (mano, animazione, vista esplosa)? */
   isDriven(node) {
-    if (node.userData.grabbed || this.ws.anims.has(node) || this.ws.remoteTargets.has(node)) return true;
+    if (node.userData.grabbed || node.userData.appearing || this.ws.anims.has(node) || this.ws.remoteTargets.has(node)) return true;
     let open = false;
     node.traverse((o) => { if (o.userData.exploded || this.ws.anims.has(o)) open = true; });
     return open;

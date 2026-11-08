@@ -232,12 +232,18 @@ export class Scanner {
       const node = this.buildFromScan(spec, shots);
       if (!node) return this.cancel('Non sono riuscita a ricostruirlo, riproviamo.');
       this.workspace.placeOnDesk(node);
+      this.appear?.(node);
       this.workspace.select(node);
       this.workspace.markDirty?.();
       this.state = 'idle';
       this.ring.visible = false;
       this.cooldown = 6; // non ripartire subito con lo stesso oggetto in mano
-      this.ai.say(spec.description || `Ecco ${spec.name}, sulla scrivania.`);
+      if (this.explodeAfter) {
+        this.explodeAfter = false;
+        this.workspace.explodeAll?.(node);
+        this.workspace.markDirty?.();
+        this.ai.say('Eccolo smontato: prendi i pezzi uno alla volta.');
+      } else this.ai.say(spec.description || `Ecco ${spec.name}, sulla scrivania.`);
     } catch (e) {
       console.error(e);
       this.cancel(this.brain.explainError?.(e) || 'Qualcosa è andato storto con la ricostruzione.');

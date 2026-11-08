@@ -169,6 +169,27 @@ export class ThemeManager {
     return true;
   }
 
+  /**
+   * Prepara in anticipo cieli e scenografie (mentre sei nella pagina iniziale),
+   * così cambiare ambiente in VR non blocca l'immagine.
+   */
+  async prewarm(renderer, camera) {
+    for (const id of THEME_ORDER) {
+      if (id === 'buio' || renderer.xr.isPresenting) continue;
+      await new Promise((r) => setTimeout(r, 120));
+      this.baker?.get(id);
+      if (!this.worlds.has(id)) {
+        const w = buildWorld(id, (name) => this.texture(name, 1));
+        if (!w) continue;
+        this.worlds.set(id, w);
+        this.scene.add(w.group);
+        w.group.visible = true; // la compilazione considera solo ciò che è visibile
+        try { await renderer.compileAsync(w.group, camera, this.scene); } catch { /* facoltativo */ }
+        w.group.visible = id === this.current;
+      }
+    }
+  }
+
   /** Nasconde/mostra la scenografia (in realtà mista si vede la stanza vera). */
   setDressingVisible(v) {
     for (const [wid, w] of this.worlds) w.group.visible = v && wid === this.current;

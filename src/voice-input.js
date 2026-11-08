@@ -3,7 +3,6 @@
  * quindi lo facciamo noi con Whisper (modello open source, gira nel visore, gratis).
  * Il modello si scarica la prima volta e poi resta in memoria nel browser.
  */
-const TF_URL = new URL('./vendor/transformers-4.3.1.mjs', import.meta.url).href;
 const MODELS = { veloce: 'onnx-community/whisper-base', preciso: 'onnx-community/whisper-small' };
 
 export class VoiceInput {
@@ -39,37 +38,35 @@ export class VoiceInput {
       proc.connect(this.ctx.destination); // necessario perché il nodo lavori (esce in silenzio)
       this.rate = this.ctx.sampleRate;
     }
-    const { pipeline, env } = await import(TF_URL);
-    env.allowLocalModels = false;
-    const files = new Map();
+    // il modello gira in un worker: mentre trascrive, la grafica resta fluida
+    if (!this.worker) {
+      this.worker = new Worker(new URL('./asr-worker.js', import.meta.url), { type: 'module' });
+      this.pending = new Map();
+      this.worker.onmessage = (e) => {
+        const m = e.data;
+        if (m.type === 'progress') { onProgress?.(m.p); this.set('loading', m.p); return; }
+        const key = m.type === 'ready' || (m.type === 'error' && m.id == null) ? 'init' : m.id;
+        const w = this.pending.get(key);
+        this.pending.delete(key);
+        if (m.type === 'error') w?.reject(new Error(m.message)); else w?.resolve(m);
+      };
+      this.worker.onerror = (e) => {
+        e.preventDefault?.();
+        for (const w of this.pending.values()) w.reject(new Error('riconoscimento vocale non avviato'));
+        this.pending.clear();
+      };
+    }
     const model = MODELS[this.quality] || MODELS.veloce;
-    const progress_callback = (p) => {
-        if (p.status === 'progress' && p.total) {
-          files.set(p.file, [p.loaded, p.total]);
-          let l = 0, t = 0;
-          for (const [a, b] of files.values()) { l += a; t += b; }
-          onProgress?.(t ? l / t : 0);
-          this.set('loading', t ? l / t : 0);
-        }
-    };
-    // con la scheda grafica (WebGPU) il "codificatore" è molto più veloce; altrimenti processore
-    let gpu = false;
-    try { gpu = !!(navigator.gpu && (await navigator.gpu.requestAdapter())); } catch { gpu = false; }
-    if (gpu && this.quality !== 'preciso') {
-      try {
-        this.asr = await pipeline('automatic-speech-recognition', model, {
-          device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' }, progress_callback,
-        });
-        this.device = 'webgpu';
-      } catch (e) {
-        console.warn('WebGPU non disponibile per la voce, uso il processore', e);
-        this.asr = null;
-      }
-    }
-    if (!this.asr) {
-      this.asr = await pipeline('automatic-speech-recognition', model, { device: 'wasm', dtype: 'q8', progress_callback });
-      this.device = 'wasm';
-    }
+    const ready = await new Promise((resolve, reject) => {
+      this.pending.set('init', { resolve, reject });
+      this.worker.postMessage({ type: 'init', model, preferGpu: this.quality !== 'preciso' });
+    });
+    this.device = ready.device;
+    this.asr = (audio) => new Promise((resolve, reject) => {
+      const id = (this.seq = (this.seq || 0) + 1);
+      this.pending.set(id, { resolve: (m) => resolve({ text: m.text }), reject });
+      this.worker.postMessage({ type: 'transcribe', id, audio }, [audio.buffer]);
+    });
     this.set('ready');
     return true;
   }

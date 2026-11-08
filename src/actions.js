@@ -72,11 +72,11 @@ const GESTURES = 'Per smontare: fai un doppio pizzico su un oggetto per aprirlo,
   + 'Con Due mani su Esplodi, prendi un oggetto con due mani e allargale: si apre quanto vuoi. '
   + 'Per buttare qualcosa, lascialo cadere nel cestino accanto alla scrivania.';
 
-const HELP = 'Tieni premuto A e chiedimi un oggetto: una sedia, un portatile, una pizza, una macchina vera. '
-  + 'In realtà mista prendi in mano un oggetto vero e giralo davanti agli occhi: lo scansiono e lo ricreo sulla scrivania. '
-  + 'Per spostare la scrivania prendi le maniglie luminose sul bordo: con una mano la alzi e la sposti, con due la giri. '
-  + 'Pizzica un oggetto per prenderlo, doppio pizzico per aprirlo, pizzico tenuto fermo per staccare un pezzo, due mani per ingrandirlo. '
-  + 'Puoi cambiare ambiente e tempo: spazio, sott\'acqua, pioggia, neve.';
+const HELP = 'Tieni premuto A e parla. Puoi chiedermi un oggetto, per esempio una sedia o una pizza. '
+  + 'Puoi dire: dammi la pizza, ruotala di 90 gradi, spostala a destra di 20 centimetri, falla alta 30 centimetri, duplica 3 volte, rimettila sulla scrivania. '
+  + 'Se tieni un oggetto in mano, di\' scomponi quello che ho in mano e potrai prendere i pezzi uno alla volta. '
+  + 'Puoi comandare tutto il menu: attiva la gravità, apri la scheda mondo, esplodi tutto, salva. '
+  + 'In realtà mista prendi un oggetto vero e di\' scansiona. Per spostare la scrivania prendi le maniglie luminose sul bordo.';
 
 const COLORS = {
   ross: 0xff4a3d, blu: 0x4f8cff, azzurr: 0x7fc8ff, verd: 0x45d483, giall: 0xffc845, viola: 0xb57bff,
@@ -468,6 +468,124 @@ export function createActions(ctx) {
     return undefined;
   }
 
+  // ---- comandi in più: oggetto in mano, spostamenti precisi, misure, elenco, ora… ----
+  const NUMW = { un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, venti: 20, trenta: 30, quaranta: 40, cinquanta: 50, cento: 100, mezzo: 0.5 };
+  const numberIn = (t, re) => {
+    const m = t.match(re);
+    if (!m) return null;
+    const v = m[1].replace(',', '.');
+    return Number.isFinite(+v) ? +v : NUMW[v] ?? null;
+  };
+  function targetNodes(item) {
+    if (item && selectByName(item.label)) return [...workspace.selected];
+    if (workspace.selected.size) return [...workspace.selected];
+    const held = ctx.heldNode?.();
+    if (held) return [held];
+    const all = workspace.topLevel();
+    return all.length ? [all[all.length - 1]] : []; // l'ultimo creato
+  }
+
+  function moreCommands(t, has, say, item) {
+    // smetti di parlare / ripeti / ora
+    if (has(/\b(zitta|zitto|silenzio|basta parlare|smetti di parlare|stai zitt)/)) { ai.stopSpeaking?.(); return null; }
+    if (has(/cosa hai detto|ripeti (quello|cosa|l'ultima)|non ho sentito/)) return say(lastMsg);
+    if (has(/che or[ae] (sono|e)|che ora/)) { const d = new Date(); return say(`Sono le ${d.getHours()} e ${String(d.getMinutes()).padStart(2, '0')}.`); }
+    if (has(/che giorno (e|e oggi)|che data/)) return say(`Oggi è ${new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}.`);
+
+    // scomponi l'oggetto che ho in mano: si apre davanti a te e prendi i pezzi uno alla volta
+    const inHand = has(/(in mano|che tengo|tengo in|ho in mano|che ho preso|questo oggetto)/) || has(/\b(smontalo|smontala|scomponilo|scomponila|aprilo|aprila|esplodilo|esplodila|dividilo|dividila)\b/);
+    if (inHand && has(/smont|scompon|apri|espl|divid|separ|disassembl|pezz/)) {
+      const held = ctx.heldNode?.();
+      if (held) {
+        ctx.releaseHeld?.(held);
+        workspace.select(held);
+        run('explodeAll', { speak: false });
+        return say('Ecco tutti i pezzi: prendili uno alla volta.');
+      }
+      if (ctx.isMixedReality?.()) { ctx.scanThenExplode?.(); return null; }
+      if (workspace.selected.size) { run('explodeAll', { speak: false }); return say('Ecco tutti i pezzi.'); }
+      return say('Non hai niente in mano: prendi un oggetto e ripeti.');
+    }
+
+    // portami / dammi l'oggetto
+    if (has(/\b(dammi|portami|passami|avvicinami|porta qui|vieni qui con)\b/) && !has(/portami (nello|nel|sott|al |in |sulla luna)/)) {
+      const nodes = targetNodes(item);
+      if (!nodes.length) return say('Non c\'è niente da portarti: dimmi prima di crearlo.');
+      ctx.bringToMe?.(nodes[0]);
+      return say(`Ecco ${nodes[0].name.toLowerCase()}.`);
+    }
+
+    // rimetti sulla scrivania
+    if (has(/\b(rimetti|riporta|appoggia|posa)\b/) && has(/scrivania|tavolo|giu/)) {
+      const nodes = targetNodes(item);
+      if (!nodes.length) return say('Non c\'è niente da rimettere.');
+      for (const n of nodes) workspace.placeOnDesk(n);
+      workspace.markDirty();
+      return say('Rimesso sulla scrivania.');
+    }
+
+    // ruota di N gradi / a destra / a sinistra / sottosopra
+    if (has(/\b(ruota|gira|giralo|girala|ruotalo|ruotala)\b/) && !has(/scrivania/)) {
+      const deg = numberIn(t, /(\d+|\w+)\s*grad/) ?? (has(/destra/) ? -90 : has(/sinistra/) ? 90 : has(/indietro|dall'altra parte|al contrario/) ? 180 : null);
+      if (deg != null) {
+        const nodes = targetNodes(item);
+        if (!nodes.length) return say('Non c\'è niente da ruotare.');
+        const sign = has(/sinistra|antiorari/) ? 1 : has(/destra|orari/) ? -1 : 1;
+        for (const n of nodes) n.rotateY((Math.abs(deg) * sign * Math.PI) / 180);
+        workspace.markDirty();
+        return say(`Ruotato di ${Math.abs(deg)} gradi.`);
+      }
+    }
+
+    // sposta a destra/sinistra/avanti/indietro/su/giù (di N centimetri)
+    const dirM = t.match(/\b(destra|sinistra|avanti|indietro|lontano|vicino|piu vicino|piu lontano|su|giu|in alto|in basso)\b/);
+    if (dirM && has(/\b(sposta|muovi|spingi|tira|spostalo|spostala|muovilo|muovila|portalo|portala|alza|abbassa|alzalo|abbassalo)\b/) && !has(/scrivania/)) {
+      const nodes = targetNodes(item);
+      if (!nodes.length) return say('Non c\'è niente da spostare.');
+      let cm = numberIn(t, /(\d+(?:[.,]\d+)?|\w+)\s*(cm|centimetr)/) ?? null;
+      const m = numberIn(t, /(\d+(?:[.,]\d+)?|\w+)\s*metr/);
+      const meters = cm != null ? cm / 100 : m != null ? m : 0.15;
+      const d = dirM[1];
+      const dir = /destra/.test(d) ? 'right' : /sinistra/.test(d) ? 'left' : /avanti|lontano/.test(d) ? 'forward' : /indietro|vicino/.test(d) ? 'back' : /su|alto/.test(d) ? 'up' : 'down';
+      ctx.moveNodes?.(nodes, dir, meters);
+      return say('Spostato.');
+    }
+    if (has(/\b(alzalo|alzala|solleva)\b/)) { const nodes = targetNodes(item); if (nodes.length) { ctx.moveNodes?.(nodes, 'up', 0.15); return say('Alzato.'); } }
+
+    // duplica N volte
+    const dupN = numberIn(t, /(\d+|\w+)\s*volte/);
+    if (has(/duplic|copi|clon/) && dupN > 1) {
+      if (!targetNodes(item).length) return say('Non c\'è niente da duplicare.');
+      for (let i = 0; i < Math.min(10, dupN); i++) run('duplicate', { speak: false });
+      return say(`Fatte ${Math.min(10, dupN)} copie.`);
+    }
+
+    // misure precise: «fallo alto 30 centimetri», «largo mezzo metro», «grande 2 metri»
+    const size = t.match(/\b(alt|larg|lung|profond|grand|spess)\w*\b.*?(\d+(?:[.,]\d+)?|\w+)\s*(mm|millimetr\w*|cm|centimetr\w*|metr\w*|m)\b/);
+    if (size && (NUMW[size[2]] != null || Number.isFinite(+size[2].replace(',', '.')))) {
+      const v = NUMW[size[2]] ?? +size[2].replace(',', '.');
+      const unit = size[3];
+      const mm = /^m(m|illi)/.test(unit) ? v : /^c/.test(unit) ? v * 10 : v * 1000;
+      const nodes = targetNodes(item);
+      if (!nodes.length) return say('Dimmi prima quale oggetto.');
+      workspace.selected = new Set(nodes);
+      const axis = /^alt/.test(size[1]) ? 'y' : /^larg/.test(size[1]) ? 'x' : /^(lung|profond|spess)/.test(size[1]) ? 'z' : 'all';
+      ctx.setSizeMm?.(axis, mm);
+      return say(`Fatto: ${mm >= 1000 ? (mm / 1000).toString().replace('.', ',') + ' metri' : mm >= 10 ? Math.round(mm / 10) + ' centimetri' : mm + ' millimetri'}.`);
+    }
+
+    // cosa c'è sulla scrivania
+    if (has(/cosa c'? ?e (sulla scrivania|qui|intorno)|cosa ho creato|elenca|quali oggetti|quanti oggetti/)) {
+      const names = workspace.topLevel().map((n) => n.name.toLowerCase());
+      if (!names.length) return say('Non c\'è ancora niente.');
+      const counts = {};
+      for (const n of names) counts[n] = (counts[n] || 0) + 1;
+      const list = Object.entries(counts).slice(0, 8).map(([n, c]) => (c > 1 ? `${c} ${n}` : n));
+      return say(`Ci sono: ${list.join(', ')}.`);
+    }
+    return undefined;
+  }
+
   function voice(raw) {
     const t = norm(fixTranscript(raw));
     const has = (re) => re.test(t);
@@ -478,6 +596,8 @@ export function createActions(ctx) {
     if (has(/\b(ciao|salve|buongiorno|buonasera|hey|ehi)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa creiamo oggi?');
     const early = t.split(' ').length <= 7 ? menuVoice(t, { early: true }) : undefined;
     if (early !== undefined) return early;
+    const more = moreCommands(t, has, say, item);
+    if (more !== undefined) return more;
     if (has(/chi sei|come ti chiami/)) return say('Sono la tua assistente. In questo mondo posso creare qualsiasi cosa del catalogo, cambiare il tempo e l’ambiente, e smontare tutto.');
     if (has(/aiuto|cosa (sai|puoi) fare|come funziona|cosa posso (fare|dire)/)) return say(HELP);
     if (has(/voce|parla/) && has(/acut|sottil|stridul/)) return run('pitch+', { speak: true });
@@ -588,8 +708,11 @@ export function createActions(ctx) {
     /** Comando del menu riconosciuto con sicurezza (usato prima di chiedere a Claude). */
     menu: (raw) => {
       const t = norm(fixTranscript(raw));
-      if (t.split(' ').length > 7) return undefined;
-      return menuVoice(t, { early: true });
+      if (t.split(' ').length > 9) return undefined;
+      const r = menuVoice(t, { early: true });
+      if (r !== undefined) return r;
+      const say = (m) => { if (m) notify(m, true); return m; };
+      return moreCommands(t, (re) => re.test(t), say, findItem(t));
     },
     get multi() { return multi; },
     get twoHand() { return settings.twoHand; },

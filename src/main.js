@@ -229,6 +229,7 @@ const scanner = new Scanner({
   scene, camera, xrInput, headsetCamera: camera3, brain, ai, actions, workspace,
   isMixedReality: () => mixedReality,
 });
+scanner.appear = (n) => appear(n);
 ctx.scan = () => scanner.start(scanner.bestHand());
 ctx.diag = () => scanner.diagnose();
 ctx.scanCancel = () => scanner.cancel();
@@ -338,6 +339,60 @@ function freeSpot(pos, fwd, r, startDist, occupied) {
   return pos.clone().addScaledVector(fwd, startDist + 8);
 }
 
+// ---------------------------------------------------------------- comparsa morbida degli oggetti
+// prima si prepara la grafica (senza bloccare il visore), poi l'oggetto "cresce" in 0,3 secondi
+const appearing = new Map();
+function appear(node) {
+  const target = node.scale.clone();
+  node.scale.multiplyScalar(0.001);
+  node.userData.appearing = true;
+  const go = () => appearing.set(node, { t: 0, target });
+  renderer.compileAsync(node, camera, scene).then(go, go);
+}
+function updateAppear(dt) {
+  for (const [node, a] of appearing) {
+    a.t = Math.min(1, a.t + dt / 0.3);
+    const k = 1 + 2.2 * Math.pow(a.t - 1, 3) + 1.2 * Math.pow(a.t - 1, 2); // leggero rimbalzo finale
+    node.scale.copy(a.target).multiplyScalar(Math.max(0.001, k));
+    if (a.t >= 1) { node.scale.copy(a.target); delete node.userData.appearing; appearing.delete(node); workspace.markDirty(); }
+  }
+}
+ctx.appear = appear;
+
+// ---------------------------------------------------------------- comandi vocali su oggetti precisi
+ctx.heldNode = () => {
+  for (const c of xrInput.controllers) if (c.userData.grabbed) return c.userData.grabbed;
+  return [...workspace.grabbing.keys()][0] || null;
+};
+ctx.releaseHeld = (node) => {
+  for (const c of xrInput.controllers) {
+    if (c.userData.grabbed !== node) continue;
+    c.userData.press = null; // niente gesti di tocco al rilascio
+    xrInput.release(c);
+  }
+};
+ctx.bringToMe = (node) => {
+  const { pos, fwd } = headPose();
+  const target = pos.clone().addScaledVector(fwd, 0.45);
+  target.y = pos.y - 0.25;
+  const box = new THREE.Box3().setFromObject(node);
+  const center = box.getCenter(new THREE.Vector3());
+  const world = node.getWorldPosition(new THREE.Vector3()).add(target.sub(center));
+  node.position.copy(node.parent.worldToLocal(world));
+  workspace.markDirty();
+};
+ctx.moveNodes = (nodes, dir, meters) => {
+  const { fwd, right } = headPose();
+  const d = { right, left: right.clone().negate(), forward: fwd, back: fwd.clone().negate(), up: new THREE.Vector3(0, 1, 0), down: new THREE.Vector3(0, -1, 0) }[dir];
+  for (const n of nodes) {
+    const w = n.getWorldPosition(new THREE.Vector3()).addScaledVector(d, meters);
+    n.position.copy(n.parent.worldToLocal(w));
+  }
+  workspace.markDirty();
+};
+ctx.setSizeMm = (axis, mm) => setSizeMm(axis, mm);
+ctx.scanThenExplode = () => { scanner.explodeAfter = true; ctx.scan(); };
+
 /** Crea un oggetto del catalogo (o della libreria): sulla scrivania, davanti a te o dal cielo. */
 function spawnItem(item, { count = 1, size = 'auto', where = null, color = null } = {}) {
   count = Math.max(1, Math.min(30, count));
@@ -386,6 +441,7 @@ function spawnItem(item, { count = 1, size = 'auto', where = null, color = null 
       node.position.y += floorY - box.min.y;
       workspace.markDirty();
     }
+    appear(node);
     made.push(node);
   }
   workspace.selected = new Set(made);
@@ -618,6 +674,7 @@ renderer.setAnimationLoop(() => {
   checkBin();
   actions.tickHistory(dt);
   themes.update(dt);
+  updateAppear(dt);
   avatars.tick(dt);
   net?.tick(dt, myPose(), workspace.grabbing.size > 0);
 
@@ -633,4 +690,5 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-window.officina = { scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
+setTimeout(() => themes.prewarm(renderer, camera), 1500);
+window.officina = { renderer, scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };

@@ -23,6 +23,8 @@ function lev(a, b) {
 const VOCAB = ['piovere', 'pioggia', 'nevicare', 'temporale', 'arcobaleno', 'nebbia', 'spazio', 'oceano', 'tramonto', 'aurora',
   'scansiona', 'scansione', 'smonta', 'rimonta', 'esplodi', 'ricomponi', 'gravita', 'scrivania', 'annulla', 'cancella', 'elimina',
   'ingrandisci', 'rimpicciolisci', 'gigante', 'minuscolo', 'volare'];
+// parole vere che somigliano a quelle sopra: non vanno mai "corrette"
+const KEEP = new Set(['scomponi', 'scomponilo', 'scomponila', 'smontalo', 'smontala', 'esplodilo', 'esplodila', 'componi', 'scansionalo', 'cancellalo', 'eliminalo', 'ingrandiscilo', 'girala', 'giralo', 'spazzola', 'spazi', 'tramonta', 'pioggie', 'piove']);
 const FIX = { cre: 'crea', crei: 'crea', crep: 'crea', creo: 'crea', fammi: 'fammi', piove: 'piove' };
 export function fixTranscript(text) {
   const w = norm(text).replace(/'/g, "' ").split(' ').filter(Boolean).map((x) => FIX[x] || x);
@@ -30,12 +32,12 @@ export function fixTranscript(text) {
   for (let i = 0; i < w.length; i++) {
     const a = w[i].replace(/'$/, ''), b = w[i + 1];
     // due parole che insieme somigliano a una parola chiave: "di ovvere" -> "piovere"
-    if (b && a.length <= 4 && !VOCAB.includes(b)) {
+    if (b && a.length <= 4 && !VOCAB.includes(b) && !KEEP.has(b)) {
       const joined = a + b;
       const hit = VOCAB.find((v) => v.length >= 6 && lev(joined, v) <= 2 && lev(b, v) > 1);
       if (hit) { out.push(hit); i++; continue; }
     }
-    const one = a.length >= 5 && !VOCAB.includes(a) ? VOCAB.find((v) => lev(a, v) <= (v.length >= 8 ? 2 : 1)) : null;
+    const one = a.length >= 5 && !VOCAB.includes(a) && !KEEP.has(a) ? VOCAB.find((v) => lev(a, v) <= (v.length >= 8 ? 2 : 1)) : null;
     out.push(one || w[i]);
   }
   return out.join(' ').replace(/' /g, "'");
