@@ -200,7 +200,7 @@ async function startSession(mode) {
   const init = { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] };
   if (mode === 'immersive-ar') {
     // sensore di profondità del Quest 3: serve alla scansione 3D degli oggetti veri
-    init.optionalFeatures.push('depth-sensing', 'plane-detection');
+    init.optionalFeatures.push('depth-sensing', 'plane-detection', 'hit-test');
     init.depthSensing = { usagePreference: ['gpu-optimized', 'cpu-optimized'], dataFormatPreference: ['float32', 'luminance-alpha', 'unsigned-short'] };
   }
   const session = await navigator.xr.requestSession(mode, init);
@@ -280,6 +280,7 @@ const tableSnap = new TableSnap({
   isMixedReality: () => mixedReality, setRealTable,
 });
 ctx.tableSnap = tableSnap;
+xrInput.tableSnap = tableSnap;
 const scanner = new Scanner({
   scene, camera, xrInput, headsetCamera: camera3, brain, ai, actions, workspace,
   isMixedReality: () => mixedReality,
@@ -717,8 +718,8 @@ renderer.xr.addEventListener('sessionstart', () => {
     // in realtà mista controllo subito se la scansione può funzionare e dico cosa manca
     if (ctx.pendingRealDesk) {
       ctx.pendingRealDesk = false;
-      tableSnap.auto = true; tableSnap.cooldown = 0;
-      ai.say('Modalità scrivania reale: appoggia le mani aperte sul tuo tavolo e tienile ferme un secondo.');
+      tableSnap.startPlacing();
+      ai.say('Modalità scrivania reale: guarda il tuo tavolo e conferma con un pizzico, il grilletto o «qui». Oppure appoggia le mani aperte sul tavolo.', { full: true });
       return;
     }
     const r = await scanner.readiness();

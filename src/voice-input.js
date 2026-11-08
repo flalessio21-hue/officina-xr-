@@ -3,7 +3,8 @@
  * quindi lo facciamo noi con Whisper (modello open source, gira nel visore, gratis).
  * Il modello si scarica la prima volta e poi resta in memoria nel browser.
  */
-const MODELS = { veloce: 'onnx-community/whisper-base', preciso: 'onnx-community/whisper-small' };
+// «veloce» (predefinito): modello piccolo, il correttore di comandi compensa gli errori; «preciso»: modello base
+const MODELS = { veloce: 'onnx-community/whisper-tiny', preciso: 'onnx-community/whisper-base' };
 
 export class VoiceInput {
   constructor({ onText, onState, isBusy }) {

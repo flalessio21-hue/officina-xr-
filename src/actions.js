@@ -43,6 +43,7 @@ export function commandPhrases() {
   for (const it of [...ALL_ITEMS, ...LIBRARY.map((l) => ({ label: l.label, words: [l.label] }))]) {
     for (const w of [it.label, ...(it.words || []).slice(0, 2)]) words.add(w.toLowerCase());
   }
+  for (const w of ['cubo', 'sfera', 'cilindro', 'cono', 'piramide', 'toro', 'tubo', 'ingranaggio', 'vite']) words.add(w);
   for (const w of words) {
     out.push(`crea un ${w}`, `crea una ${w}`, `fammi un ${w}`, `fammi una ${w}`, `elimina il ${w}`, `elimina la ${w}`,
       `smonta il ${w}`, `esplodi il ${w}`, `dammi il ${w}`, `dammi la ${w}`, `carica il ${w}`);
@@ -540,9 +541,11 @@ export function createActions(ctx) {
     // modalità scrivania reale: il tavolo vero diventa il piano di lavoro
     if (has(/modalita (scrivania|tavolo) (reale|vera)|scrivania reale|tavolo reale/)) {
       if (!ctx.isMixedReality?.()) { ctx.pendingRealDesk = true; ctx.mixedReality?.(); return say('Passo alla realtà mista: poi appoggia le mani aperte sul tuo tavolo.'); }
-      if (ctx.tableSnap) { ctx.tableSnap.auto = true; ctx.tableSnap.cooldown = 0; }
-      return say('Appoggia le mani aperte sul tavolo e tienile ferme un secondo.');
+      ctx.tableSnap?.startPlacing();
+      return say('Guarda il tuo tavolo: quando vedi il cerchio verde fai un pizzico, premi il grilletto o di\' «qui». Oppure appoggia le mani aperte sul tavolo.');
     }
+    // conferma del mirino del tavolo
+    if (ctx.tableSnap?.placing && has(/^(qui|metti qui|mettila qui|questo|questo tavolo|ok|fatto|conferma|va bene)$/)) { ctx.tableSnap.confirm(); return null; }
     // realtà virtuale (uscire dalla realtà mista)
     if (has(/(torna|passa|vai|ritorna)\w* (in|alla|nella) realta virtuale|^realta virtuale$|esci dalla realta mista|niente realta mista/)) { ctx.virtualReality?.(); return say('Torno alla realtà virtuale.'); }
     // il menu
@@ -569,8 +572,8 @@ export function createActions(ctx) {
     // il tavolo vero diventa la scrivania (realtà mista)
     if (has(/\b(usa|adatta|aggancia|allinea)\b.*\b(tavolo|piano|scrivania)\b|\b(mio|questo|vero) (tavolo|piano)\b|tavolo vero/) && !has(/\b(crea|creami|fammi|costruisci|genera)\b/)) {
       if (!ctx.isMixedReality?.()) return say('Funziona in realtà mista: entra e appoggia le mani aperte sul tuo tavolo.');
-      if (ctx.tableSnap) { ctx.tableSnap.auto = true; ctx.tableSnap.cooldown = 0; }
-      return say('Appoggia le mani aperte sul tavolo e tienile ferme un secondo.');
+      ctx.tableSnap?.startPlacing();
+      return say('Guarda il tuo tavolo e conferma con un pizzico o «qui», oppure appoggia le mani aperte sul tavolo.');
     }
     if (has(/scrivania (virtuale|finta|di prima)|togli il tavolo|non (usare|adattare)( il)? tavolo/)) {
       ctx.setRealTable?.(false);

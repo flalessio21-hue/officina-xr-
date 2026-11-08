@@ -224,6 +224,8 @@ export class XRInput {
 
   // ---------- eventi ----------
   onSelectStart(c) {
+    // scrivania reale: il pizzico o il grilletto confermano il punto del tavolo nel mirino
+    if (this.tableSnap?.placing && this.tableSnap.hit) { this.tableSnap.confirm(); this.haptic(c, 0.5, 40); return; }
     if (this.isHand(c)) {
       if (c.userData.poking) return; // il dito sta usando il pannello
       if (this.pinchPoint(c, _v1)) {

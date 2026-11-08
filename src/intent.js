@@ -28,7 +28,7 @@ const KEEP = new Set(['scomponi', 'scomponilo', 'scomponila', 'smontalo', 'smont
 const FIX = { cre: 'crea', crei: 'crea', crep: 'crea', creo: 'crea', fammi: 'fammi', piove: 'piove' };
 export function fixTranscript(text) {
   // «crea» sentito come «che è» / «create» / «crei» all'inizio della frase
-  text = norm(text).replace(/^(che e|ke e|create|crei|cre e|che a)\b/, 'crea');
+  text = norm(text).replace(/^(che e|ke e|create|crei|cre e|che a|che ha|che|gra|cre|pe e|e che)\s+(?=(un|una|uno|un'|due|tre|quattro|cinque|dei|delle)\b)/, 'crea ').replace(/^(che e|ke e|create|crei|cre e)\b/, 'crea');
   const w = norm(text).replace(/'/g, "' ").split(' ').filter(Boolean).map((x) => FIX[x] || x);
   const out = [];
   for (let i = 0; i < w.length; i++) {
