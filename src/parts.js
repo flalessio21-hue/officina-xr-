@@ -99,19 +99,19 @@ export function createAssembly(name = 'Assieme', children = []) {
 export const isNode = (o) => !!(o && (o.userData.isPart || o.userData.isAssembly));
 
 // --- helper per costruire i modelli demo ---------------------------------
-function part(kind, params, color, name, pos = [0, 0, 0], rot = [0, 0, 0]) {
+export function part(kind, params, color, name, pos = [0, 0, 0], rot = [0, 0, 0]) {
   const m = createPart(kind, params, color, name);
   m.position.fromArray(pos);
   m.rotation.fromArray(rot);
   return m;
 }
-function at(node, pos, rot) {
+export function at(node, pos, rot) {
   node.position.fromArray(pos);
   if (rot) node.rotation.fromArray(rot);
   return node;
 }
 
-const C = {
+export const C = {
   carbon: 0x1d1f24, metal: 0xc9ced6, steel: 0x9aa0a8, copper: 0xb87333, pcb: 0x1f8a4c,
   chip: 0x15171b, gold: 0xffc845, bell: 0xd94a3a, prop: 0xe8ecf2, battery: 0x4f8cff, red: 0xff4a3d,
 };

@@ -28,6 +28,10 @@ export class XRInput {
     this.tmp = new THREE.Matrix4();
     this.controllers = [];
     this.twoHand = null;
+    // tempi dei gesti (ms): tocco breve, doppio pizzico, pizzico lungo per estrarre
+    this.tapMs = 450;
+    this.doubleMs = 700;
+    this.longMs = 900;
     this.snapReady = { left: true, right: true };
 
     const cmf = new XRControllerModelFactory();
@@ -120,13 +124,14 @@ export class XRInput {
     // prima i pezzi già tenuti dall'altra mano (per la presa a due mani)
     for (const o of this.controllers) {
       const held = o.userData.grabbed;
-      if (held && _box.setFromObject(held).distanceToPoint(point) < maxDist) return held;
+      if (held && _box.setFromObject(held).distanceToPoint(point) < maxDist) { this.nearMesh = null; return held; }
     }
     let best = null, bd = maxDist;
     for (const m of this.workspace.pickables()) {
       const d = _box.setFromObject(m).distanceToPoint(point);
       if (d < bd) { bd = d; best = m; }
     }
+    this.nearMesh = best; // il pezzo esatto toccato (serve per estrarre un componente)
     return best ? this.workspace.resolvePick(best) : null;
   }
 
@@ -159,8 +164,11 @@ export class XRInput {
     return true;
   }
 
-  grab(c, node, holder, button) {
+  grab(c, node, holder, button, mesh = null) {
     if (this.tryTwoHand(c, node, button)) return;
+    // per i gesti: tocco breve, doppio pizzico, pizzico lungo
+    c.userData.press = { t: performance.now(), node, mesh, start: this.holdPoint(c, new THREE.Vector3()) || c.getWorldPosition(new THREE.Vector3()), done: false };
+    c.userData.holder = holder;
     this.workspace.select(node, this.actions.multi);
     this.workspace.beginGrab(node, node.parent);
     holder.updateMatrixWorld(true);
@@ -177,16 +185,28 @@ export class XRInput {
     const pa = this.holdPoint(other, new THREE.Vector3());
     const pb = this.holdPoint(c, new THREE.Vector3());
     if (!pa || !pb) return false;
-    this.twoHand = { a: other, b: c, node, button, d0: Math.max(0.05, pa.distanceTo(pb)), s0: node.scale.clone() };
+    const explode = this.actions.twoHand === 'explode' && node.userData.isAssembly;
+    this.twoHand = {
+      a: other, b: c, node, button, d0: Math.max(0.05, pa.distanceTo(pb)), s0: node.scale.clone(),
+      mode: explode ? 'explode' : 'scale', f0: node.userData.exploded ? 1 : 0,
+    };
+    if (other.userData.press) other.userData.press.done = true; // niente pizzico lungo durante il gesto
     this.haptic(c, 0.4, 30);
     this.haptic(other, 0.4, 30);
     return true;
   }
 
+  endTwoHand() {
+    const th = this.twoHand;
+    this.twoHand = null;
+    if (th?.mode === 'explode') this.workspace.endExplodeGesture(th.node);
+  }
+
   release(c) {
-    if (this.twoHand && (this.twoHand.a === c || this.twoHand.b === c)) this.twoHand = null;
+    if (this.twoHand && (this.twoHand.a === c || this.twoHand.b === c)) this.endTwoHand();
     const node = c.userData.grabbed;
     if (!node) return;
+    this.checkTap(c, node);
     c.userData.grabbed = null;
     c.userData.grabButton = null;
     if (node.userData.deleted) return;
@@ -204,7 +224,7 @@ export class XRInput {
         const node = this.nearestNode(_v1.clone(), 0.03);
         if (node) {
           this.updateAnchor(c);
-          this.grab(c, node, c.userData.anchor, 'select');
+          this.grab(c, node, c.userData.anchor, 'select', this.nearMesh);
           return;
         }
       }
@@ -216,7 +236,7 @@ export class XRInput {
       if (id) { this.actions.run(id); this.haptic(c, 0.5, 30); }
     } else if (hit.kind === 'part') {
       const node = this.workspace.resolvePick(hit.object);
-      if (node) this.grab(c, node, c, 'select');
+      if (node) this.grab(c, node, c, 'select', hit.object);
     } else if (hit.kind === 'floor') {
       this.teleport(hit.point);
     }
@@ -225,7 +245,7 @@ export class XRInput {
   onSqueezeStart(c) {
     if (this.isHand(c)) return;
     const node = this.nearestNode(c.userData.grip.getWorldPosition(new THREE.Vector3()), 0.06);
-    if (node) { this.grab(c, node, c.userData.grip, 'squeeze'); return; }
+    if (node) { this.grab(c, node, c.userData.grip, 'squeeze', this.nearMesh); return; }
     const hit = this.intersect(c);
     if (hit?.kind === 'part') {
       const n = this.workspace.resolvePick(hit.object);
@@ -236,8 +256,76 @@ export class XRInput {
   }
 
   onButtonEnd(c, button) {
-    if (this.twoHand?.b === c && this.twoHand.button === button) { this.twoHand = null; return; }
+    if (this.twoHand?.b === c && this.twoHand.button === button) { this.endTwoHand(); return; }
     if (c.userData.grabButton === button) this.release(c);
+  }
+
+  // ---------- gesti per smontare ----------
+
+  /** Tocco breve e fermo: due di fila sullo stesso oggetto lo aprono o lo richiudono. */
+  checkTap(c, node) {
+    const p = c.userData.press;
+    c.userData.press = null;
+    if (!p || p.done) return;
+    const now = performance.now();
+    const pos = this.holdPoint(c, new THREE.Vector3()) || c.getWorldPosition(new THREE.Vector3());
+    if (now - p.t > this.tapMs || pos.distanceTo(p.start) > 0.03) return;
+    const last = c.userData.lastTap;
+    if (last && now - last.t < this.doubleMs && last.node === node) {
+      c.userData.lastTap = null;
+      // finito il rilascio, apri/chiudi
+      setTimeout(() => this.toggleOpen(node), 0);
+      this.haptic(c, 0.6, 40);
+    } else {
+      c.userData.lastTap = { t: now, node };
+    }
+  }
+
+  toggleOpen(node) {
+    const ws = this.workspace;
+    if (node.userData.isAssembly) {
+      if (node.userData.exploded) ws.collapse(node); else ws.explode(node);
+      this.actions.announce?.(node.userData.exploded ? `${node.name} aperto.` : `${node.name} richiuso.`);
+    } else if (node.parent?.userData.exploded) {
+      ws.collapse(node.parent);
+      this.actions.announce?.(`${node.parent.name} richiuso.`);
+    }
+    ws.markDirty();
+  }
+
+  /** Pizzico tenuto fermo: il componente toccato si stacca dall'assieme e resta in mano. */
+  checkLongPress(c) {
+    const p = c.userData.press;
+    if (!p || p.done || !c.userData.grabbed || this.twoHand) return;
+    const pos = this.holdPoint(c, new THREE.Vector3()) || c.getWorldPosition(new THREE.Vector3());
+    if (pos.distanceTo(p.start) > 0.02) { p.done = true; return; } // si sta spostando: è una presa normale
+    const node = c.userData.grabbed;
+    if (!node.userData.isAssembly || !p.mesh) { p.done = true; return; }
+    const held = performance.now() - p.t;
+    // vibrazioni crescenti: "sta per staccarsi" (lascia prima se non vuoi estrarre)
+    const step = Math.floor((held / this.longMs) * 4);
+    if (held > this.longMs * 0.35 && step !== p.step) { p.step = step; this.haptic(c, 0.1 + step * 0.12, 15); }
+    if (held < this.longMs) return;
+    p.done = true;
+    // il componente = il figlio diretto dell'assieme sul percorso verso il pezzo toccato
+    let comp = p.mesh;
+    while (comp && comp.parent !== node) comp = comp.parent;
+    if (!comp || comp === node) return;
+    const holder = c.userData.holder;
+    const button = c.userData.grabButton || 'select';
+    this.release(c);
+    c.userData.lastTap = null;
+    if (!this.workspace.extract(comp)) return;
+    if (holder === c.userData.anchor) this.updateAnchor(c);
+    this.workspace.beginGrab(comp, this.workspace.root);
+    holder.updateMatrixWorld(true);
+    c.userData.grabParent = this.workspace.root;
+    holder.attach(comp);
+    c.userData.grabbed = comp;
+    c.userData.grabButton = button;
+    c.userData.press = { t: performance.now(), node: comp, mesh: p.mesh, start: pos, done: true };
+    this.haptic(c, 1, 60);
+    this.actions.announce?.(`${comp.name} estratto da ${node.name}.`);
   }
 
   // ---------- movimento ----------
@@ -364,13 +452,19 @@ export class XRInput {
     }
 
     // scala a due mani
+    for (const c of this.controllers) this.checkLongPress(c);
+
     const th = this.twoHand;
     if (th) {
       if (th.a.userData.grabbed !== th.node) this.twoHand = null;
       else {
         const pa = this.holdPoint(th.a, new THREE.Vector3());
         const pb = this.holdPoint(th.b, new THREE.Vector3());
-        if (pa && pb) {
+        if (pa && pb && th.mode === 'explode') {
+          // allargando le mani l'oggetto si apre (vista esplosa continua)
+          const f = THREE.MathUtils.clamp(th.f0 + (pa.distanceTo(pb) - th.d0) / 0.25, 0, 1.8);
+          this.workspace.setExplodeFactor(th.node, f);
+        } else if (pa && pb) {
           const f = THREE.MathUtils.clamp(pa.distanceTo(pb) / th.d0, 0.05, 20);
           th.node.scale.copy(th.s0).multiplyScalar(f);
         }

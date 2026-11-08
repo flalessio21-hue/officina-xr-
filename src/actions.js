@@ -1,66 +1,71 @@
 import { THEMES, ThemeManager } from './themes.js';
 
-export const PANEL_LAYOUT = [
-  { id: 'box', label: 'Cubo', group: 'crea' },
-  { id: 'cylinder', label: 'Cilindro', group: 'crea' },
-  { id: 'sphere', label: 'Sfera', group: 'crea' },
-  { id: 'cone', label: 'Cono', group: 'crea' },
-  { id: 'torus', label: 'Toro', group: 'crea' },
-  { id: 'tube', label: 'Tubo', group: 'crea' },
-  { id: 'gear', label: 'Ingranaggio', group: 'crea' },
-  { id: 'screw', label: 'Vite + dado', group: 'crea' },
+import { LIBRARY } from './library.js';
 
-  { id: 'duplicate', label: 'Duplica', group: 'modifica' },
-  { id: 'delete', label: 'Elimina', group: 'modifica' },
-  { id: 'group', label: 'Raggruppa', group: 'modifica' },
-  { id: 'ungroup', label: 'Separa', group: 'modifica' },
+const b = (id, label) => ({ id, label });
 
-  { id: 'explode', label: 'Esplodi', group: 'esplodi' },
-  { id: 'explodeAll', label: 'Esplodi tutto', group: 'esplodi' },
-  { id: 'collapse', label: 'Ricomponi', group: 'esplodi' },
-  { id: 'sample', label: 'Drone demo', group: 'esplodi' },
-
-  { id: 'sx+', label: 'Largh +', group: 'misura' },
-  { id: 'sx-', label: 'Largh −', group: 'misura' },
-  { id: 'sy+', label: 'Alt +', group: 'misura' },
-  { id: 'sy-', label: 'Alt −', group: 'misura' },
-  { id: 'sz+', label: 'Prof +', group: 'misura' },
-  { id: 'sz-', label: 'Prof −', group: 'misura' },
-  { id: 's+', label: 'Scala +', group: 'misura' },
-  { id: 's-', label: 'Scala −', group: 'misura' },
-
-  { id: 'rotate', label: 'Ruota 45°', group: 'modifica' },
-  { id: 'color', label: 'Colore', group: 'modifica' },
-  { id: 'multi', label: 'Multi: NO', group: 'modifica' },
-  { id: 'deselect', label: 'Deseleziona', group: 'modifica' },
-
-  { id: 'talk', label: 'Parla con AI', group: 'sistema' },
-  { id: 'save', label: 'Salva', group: 'sistema' },
-  { id: 'load', label: 'Carica', group: 'sistema' },
-  { id: 'export', label: 'Esporta GLB', group: 'sistema' },
-
-  { id: 'deskUp', label: 'Scrivania ▲', group: 'sistema' },
-  { id: 'deskDown', label: 'Scrivania ▼', group: 'sistema' },
-  { id: 'clear', label: 'Pulisci', group: 'sistema' },
-  { id: 'help', label: 'Aiuto', group: 'sistema' },
-
-  { id: 'home', label: 'Torna qui', group: 'muovi' },
-  { id: 'turnL', label: 'Gira ◀', group: 'muovi' },
-  { id: 'turnR', label: 'Gira ▶', group: 'muovi' },
-  { id: 'lamp', label: 'Lampada', group: 'muovi' },
-
-  { id: 'theme:buio', label: 'Buio', group: 'ambiente' },
-  { id: 'theme:spazio', label: 'Spazio', group: 'ambiente' },
-  { id: 'theme:acqua', label: "Sott'acqua", group: 'ambiente' },
-  { id: 'theme:tramonto', label: 'Tramonto', group: 'ambiente' },
-  { id: 'theme:aurora', label: 'Aurora', group: 'ambiente' },
-  { id: 'invite', label: 'Invita', group: 'ambiente' },
-  { id: 'pitch+', label: 'Voce acuta', group: 'ambiente' },
-  { id: 'pitch-', label: 'Voce grave', group: 'ambiente' },
+/** Il pannello a sinistra della scrivania, diviso in schede. */
+export const PANEL_TABS = [
+  {
+    id: 'crea', label: 'Crea', color: '#3fa9ff', hint: 'Tocca una forma: compare sulla scrivania, poi prendila con la mano.',
+    buttons: [
+      b('box', 'Cubo'), b('sphere', 'Sfera'), b('cylinder', 'Cilindro'), b('cone', 'Cono'),
+      b('pyramid', 'Piramide'), b('torus', 'Toro'), b('tube', 'Tubo'), b('gear', 'Ingranaggio'),
+      b('screw', 'Vite + dado'), b('duplicate', 'Duplica'), b('color', 'Colore'), b('undo', 'Annulla'),
+    ],
+  },
+  {
+    id: 'libreria', label: 'Libreria', color: '#ffc845', hint: 'Oggetti già montati: smontali pezzo per pezzo (scheda Smonta).',
+    buttons: LIBRARY.map((it) => b('lib:' + it.id, it.label)),
+  },
+  {
+    id: 'modifica', label: 'Modifica', color: '#45d483', hint: 'Agisce sugli oggetti selezionati (evidenziati in blu).',
+    buttons: [
+      b('duplicate', 'Duplica'), b('delete', 'Elimina'), b('group', 'Raggruppa'), b('ungroup', 'Separa'),
+      b('rotate', 'Ruota 45°'), b('flip', 'Capovolgi'), b('color', 'Colore'), b('multi', 'Multi: NO'),
+      b('selectAll', 'Seleziona tutto'), b('deselect', 'Deseleziona'), b('undo', 'Annulla'), b('redo', 'Ripeti'),
+    ],
+  },
+  {
+    id: 'misure', label: 'Misure', color: '#ff9f43', hint: 'Oppure prendi l’oggetto con due mani e allargale.',
+    buttons: [
+      b('s+', 'Scala +'), b('s-', 'Scala −'), b('resetScale', 'Misura originale'), b('measure', 'Quanto misura?'),
+      b('sx+', 'Largh +'), b('sx-', 'Largh −'), b('sy+', 'Alt +'), b('sy-', 'Alt −'),
+      b('sz+', 'Prof +'), b('sz-', 'Prof −'), b('s*2', 'Doppio'), b('s/2', 'Metà'),
+    ],
+  },
+  {
+    id: 'smonta', label: 'Smonta', color: '#ff6b4a', hint: 'Doppio pizzico apre/chiude · pizzico lungo estrae un pezzo · due mani allargano.',
+    buttons: [
+      b('explode', 'Esplodi'), b('explodeAll', 'Esplodi tutto'), b('collapse', 'Ricomponi'), b('extract', 'Estrai pezzo'),
+      b('twohand', 'Due mani: SCALA'), b('gestures', 'Come si fa?'), b('collapseAll', 'Ricomponi tutto'), b('reassemble', 'Rimonta estratti'),
+    ],
+  },
+  {
+    id: 'mondo', label: 'Mondo', color: '#b57bff', hint: 'Il tuo mondo privato: ambiente, gravità, luce e posizione.',
+    buttons: [
+      b('theme:buio', 'Buio'), b('theme:spazio', 'Spazio'), b('theme:acqua', "Sott'acqua"), b('theme:tramonto', 'Tramonto'),
+      b('theme:aurora', 'Aurora'), b('gravity', 'Gravità: NO'), b('lamp', 'Lampada'), b('home', 'Torna qui'),
+      b('turnL', 'Gira ◀'), b('turnR', 'Gira ▶'), b('deskUp', 'Scrivania ▲'), b('deskDown', 'Scrivania ▼'),
+    ],
+  },
+  {
+    id: 'sistema', label: 'Sistema', color: '#7fe3ff', hint: 'Tutto resta salvato su questo visore: è il tuo mondo personale.',
+    buttons: [
+      b('slot', 'Progetto 1'), b('save', 'Salva'), b('load', 'Apri'), b('new', 'Nuovo'),
+      b('talk', 'Parla con AI'), b('pitch+', 'Voce acuta'), b('pitch-', 'Voce grave'), b('help', 'Aiuto'),
+      b('export', 'Esporta GLB'), b('invite', 'Invita'), b('clear', 'Svuota'),
+    ],
+  },
 ];
 
-const SAVE_KEY = 'officina-xr-save';
+const SAVE_KEY = 'officina-xr-save'; // + numero del progetto
 const DESK_KEY = 'officina-xr-desk';
+
+const GESTURES = 'Per smontare: fai un doppio pizzico su un oggetto per aprirlo, un altro doppio pizzico per richiuderlo. '
+  + 'Tieni il pizzico fermo per mezzo secondo su un componente: si stacca e te lo ritrovi in mano. '
+  + 'Con Due mani su Esplodi, prendi un oggetto con due mani e allargale: si apre quanto vuoi. '
+  + 'Per buttare qualcosa, lascialo cadere nel cestino accanto alla scrivania.';
 
 const HELP = 'Crea un pezzo dal pannello. Con le mani pizzicalo per prenderlo, tocca i pulsanti col dito, e usa due mani per ingrandirlo. '
   + 'Coi controller usa grilletto e grip; lo stick sinistro ti fa camminare, il destro ti gira. Punta il pavimento e premi per teletrasportarti. '
@@ -98,6 +103,60 @@ export function createActions(ctx) {
   ai.onText = (t) => { lastMsg = t; };
 
   const need = (fn, msg = 'Prima seleziona qualcosa.') => (workspace.selected.size ? fn() : msg);
+
+  // ---------- annulla / ripeti: istantanee del mondo dopo ogni modifica ----------
+  const history = { past: [], future: [], seen: workspace.version || 0, quiet: 0, restoring: false };
+  function snapshot() { return JSON.stringify(workspace.serialize()); }
+  history.past.push(snapshot());
+  function tickHistory(dt) {
+    const v = workspace.version || 0;
+    if (v !== history.seen) { history.seen = v; history.quiet = 0.5; return; }
+    if (history.quiet > 0 && workspace.grabbing.size === 0) {
+      history.quiet -= dt;
+      if (history.quiet <= 0) {
+        const snap = snapshot();
+        if (snap !== history.past[history.past.length - 1]) {
+          history.past.push(snap);
+          if (history.past.length > 40) history.past.shift();
+          history.future = [];
+        }
+      }
+    }
+  }
+  function restore(json) {
+    workspace.load(JSON.parse(json));
+    history.seen = workspace.version || 0;
+    history.quiet = 0;
+  }
+  function undo() {
+    if (history.quiet > 0) { // c'è una modifica non ancora fotografata
+      history.quiet = 0;
+      const snap = snapshot();
+      if (snap !== history.past[history.past.length - 1]) history.past.push(snap);
+    }
+    if (history.past.length < 2) return 'Non c’è niente da annullare.';
+    history.future.push(history.past.pop());
+    restore(history.past[history.past.length - 1]);
+    return 'Annullato.';
+  }
+  function redo() {
+    const next = history.future.pop();
+    if (!next) return 'Non c’è niente da ripetere.';
+    history.past.push(next);
+    restore(next);
+    return 'Ripetuto.';
+  }
+
+  // ---------- progetti (slot) ----------
+  let slot = parseInt(store.get('officina-xr-slot') || '1', 10) || 1;
+  const slotLabel = () => {
+    const has = !!store.get(SAVE_KEY + '-' + slot) || (slot === 1 && !!store.get(SAVE_KEY));
+    return `Progetto ${slot}${has ? ' ●' : ''}`;
+  };
+  panel.setLabel('slot', slotLabel());
+
+  // ---------- impostazioni dei gesti ----------
+  const settings = { twoHand: 'scale' };
 
   function exportGLB() {
     import('three/addons/exporters/GLTFExporter.js').then(({ GLTFExporter }) => {
@@ -169,11 +228,60 @@ export function createActions(ctx) {
     },
     deselect: () => (workspace.clearSelection(), 'Selezione annullata.'),
     talk: () => (ai.listen(), null),
-    save: () => (store.set(SAVE_KEY, JSON.stringify(workspace.serialize())) ? 'Progetto salvato.' : 'Non riesco a salvare in questo browser.'),
+    save: () => {
+      const ok = store.set(SAVE_KEY + '-' + slot, JSON.stringify(workspace.serialize()));
+      panel.setLabel('slot', slotLabel());
+      return ok ? `Salvato nel progetto ${slot}.` : 'Non riesco a salvare in questo browser.';
+    },
     load: () => {
-      const raw = store.get(SAVE_KEY);
-      if (!raw) return 'Nessun salvataggio trovato.';
-      try { workspace.load(JSON.parse(raw)); return 'Progetto caricato.'; } catch { return 'Il salvataggio è danneggiato.'; }
+      const raw = store.get(SAVE_KEY + '-' + slot) || (slot === 1 ? store.get(SAVE_KEY) : null);
+      if (!raw) return `Il progetto ${slot} è vuoto.`;
+      try { workspace.load(JSON.parse(raw)); return `Progetto ${slot} aperto.`; } catch { return 'Il salvataggio è danneggiato.'; }
+    },
+    slot: () => {
+      slot = (slot % 6) + 1;
+      store.set('officina-xr-slot', String(slot));
+      panel.setLabel('slot', slotLabel());
+      return `Progetto ${slot} selezionato: tocca Apri per caricarlo o Salva per salvarci il mondo attuale.`;
+    },
+    new: () => (workspace.clear(), `Scrivania pulita. Quando vuoi, salva nel progetto ${slot}.`),
+    undo,
+    redo,
+    flip: () => need(() => { for (const n of workspace.selected) n.rotateX(Math.PI); workspace.markDirty(); return 'Capovolto.'; }),
+    selectAll: () => `Selezionat${workspace.selectAll() === 1 ? 'o 1 oggetto' : 'i ' + workspace.selected.size + ' oggetti'}.`,
+    resetScale: () => need(() => { for (const n of workspace.selected) n.scale.set(1, 1, 1); workspace.markDirty(); return 'Misura originale.'; }),
+    measure: () => workspace.info(),
+    's*2': () => need(() => (workspace.scaleSelected('all', 2), 'Doppio.')),
+    's/2': () => need(() => (workspace.scaleSelected('all', 0.5), 'Metà.')),
+    extract: () => {
+      const sel = [...workspace.selected].filter((n) => n.parent !== workspace.root);
+      if (!sel.length) return 'Apri un oggetto (Esplodi), seleziona un suo pezzo e poi tocca Estrai. Oppure tieni il pizzico fermo su un componente.';
+      sel.forEach((n) => workspace.extract(n));
+      return sel.length === 1 ? `${sel[0].name} estratto: ora è un pezzo libero.` : `${sel.length} pezzi estratti.`;
+    },
+    reassemble: () => {
+      const n = workspace.reassemble();
+      return n ? `Rimessi al loro posto ${n} pezzi.` : 'Non ci sono pezzi estratti da rimontare.';
+    },
+    collapseAll: () => {
+      let any = false;
+      for (const t of workspace.topLevel()) any = workspace.collapse(t) || any;
+      return any ? 'Tutto ricomposto.' : 'È già tutto assemblato.';
+    },
+    twohand: () => {
+      settings.twoHand = settings.twoHand === 'scale' ? 'explode' : 'scale';
+      panel.setLabel('twohand', settings.twoHand === 'scale' ? 'Due mani: SCALA' : 'Due mani: ESPLODI');
+      panel.setActive('twohand', settings.twoHand === 'explode');
+      return settings.twoHand === 'scale'
+        ? 'Con due mani ora ingrandisci e rimpicciolisci.'
+        : 'Con due mani ora apri gli oggetti: prendili con entrambe le mani e allargale.';
+    },
+    gestures: () => GESTURES,
+    gravity: () => {
+      const on = ctx.physics?.toggle();
+      panel.setLabel('gravity', on ? 'Gravità: SÌ' : 'Gravità: NO');
+      panel.setActive('gravity', !!on);
+      return on ? 'Gravità attiva: gli oggetti cadono, si appoggiano e puoi lanciarli.' : 'Gravità spenta: gli oggetti restano sospesi dove li lasci.';
     },
     export: exportGLB,
     deskUp: () => moveDesk(0.03),
@@ -200,11 +308,23 @@ export function createActions(ctx) {
     return `Altezza scrivania: ${Math.round((0.75 + y) * 100)} cm.`;
   }
 
-  const SPOKEN = new Set(['sample', 'help', 'explodeAll', 'group']);
+  const SPOKEN = new Set(['sample', 'help', 'explodeAll', 'group', 'gestures', 'gravity', 'twohand']);
 
   function run(id, { speak } = {}) {
+    if (id.startsWith('tab:')) {
+      panel.setTab(id.slice(4));
+      return null;
+    }
     panel.press(id);
     let msg;
+    if (id.startsWith('lib:')) {
+      const item = LIBRARY.find((it) => 'lib:' + it.id === id);
+      if (!item) return null;
+      const node = workspace.loadLibrary(item.build);
+      msg = `${node.name}: ${workspace.countParts(node)} pezzi. Doppio pizzico per aprirlo, pizzico lungo su un componente per estrarlo.`;
+      notify(msg, speak ?? true);
+      return msg;
+    }
     if (id.startsWith('theme:')) {
       const th = id.slice(6);
       if (themes?.current === th) msg = 'Siamo già qui.';
@@ -216,7 +336,7 @@ export function createActions(ctx) {
       notify(msg, speak ?? true);
       return msg;
     }
-    if (['box', 'cylinder', 'sphere', 'cone', 'torus', 'tube', 'gear', 'screw'].includes(id)) {
+    if (['box', 'cylinder', 'sphere', 'cone', 'pyramid', 'torus', 'tube', 'gear', 'screw'].includes(id)) {
       const n = workspace.createPrimitive(id);
       msg = `${n.name} creat${n.name.endsWith('a') ? 'a' : 'o'}. Afferralo per spostarlo.`;
     } else {
@@ -279,6 +399,10 @@ export function createActions(ctx) {
     run,
     voice,
     get multi() { return multi; },
+    get twoHand() { return settings.twoHand; },
+    tickHistory,
+    announce: (msg) => notify(msg, false),
+    undo,
     status() { return [workspace.info(), lastMsg]; },
   };
 }

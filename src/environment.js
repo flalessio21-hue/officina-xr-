@@ -167,6 +167,22 @@ export function createEnvironment(scene, renderer) {
   fill.target.position.set(0, DESK.h, 0);
   deskRig.add(fill, fill.target);
 
+  // cestino accanto alla scrivania: ci lasci cadere un oggetto e sparisce
+  const bin = new THREE.Group();
+  bin.name = 'cestino';
+  bin.position.set(1.05, 0, -0.42);
+  const binMat = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.35, metalness: 0.75, side: THREE.DoubleSide });
+  const binWall = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.14, 0.42, 48, 1, true), binMat);
+  binWall.position.y = 0.21;
+  const binBottom = new THREE.Mesh(new THREE.CircleGeometry(0.14, 48).rotateX(-Math.PI / 2), binMat);
+  binBottom.position.y = 0.005;
+  const binRim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.006, 8, 64).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff4a3d }));
+  binRim.position.y = 0.42;
+  binWall.castShadow = binWall.receiveShadow = true;
+  bin.add(binWall, binBottom, binRim);
+  scene.add(bin);
+  const binInfo = { center: bin.position.clone(), radius: 0.17, height: 0.44 };
+
   const workspaceRoot = new THREE.Group();
   workspaceRoot.name = 'workspace';
   workspaceRoot.position.y = DESK.h + DESK.matT;
@@ -180,7 +196,7 @@ export function createEnvironment(scene, renderer) {
   }
 
   return {
-    deskRig, workspaceRoot, floor, hemi, blockers, setDeskHeight,
+    deskRig, workspaceRoot, floor, hemi, blockers, setDeskHeight, bin: binInfo, deskTop: top, mat,
     toggleLamp: () => lamp.userData.toggle(),
   };
 }

@@ -125,9 +125,18 @@ export class Workspace {
     return node;
   }
 
+  /** Mette sulla scrivania un oggetto della libreria (assieme già montato). */
+  loadLibrary(build) {
+    const node = build();
+    this.placeOnDesk(node);
+    this.select(node);
+    return node;
+  }
+
   createPrimitive(kind) {
     let node;
     if (kind === 'screw') node = buildScrewAndNut();
+    else if (kind === 'pyramid') node = createPart('cone', { r: 0.055, h: 0.09, seg: 4 }, PALETTE[this.spawnIndex % PALETTE.length], 'Piramide');
     else node = createPart(kind, DEFAULTS[kind], PALETTE[this.spawnIndex % PALETTE.length]);
     this.placeOnDesk(node);
     this.select(node);
@@ -247,6 +256,88 @@ export class Workspace {
       this.markDirty();
     }
     return asms.length;
+  }
+
+  // ---------- smontaggio a mano ----------
+
+  /**
+   * Stacca un componente dal suo assieme e lo rende un oggetto libero (resta dov'è nel mondo).
+   * Si ricorda da dove viene, così «Rimonta estratti» lo rimette al suo posto.
+   */
+  extract(node) {
+    const parent = node.parent;
+    if (!parent || parent === this.root || !parent.userData.isAssembly) return false;
+    this.anims.delete(node);
+    const home = node.userData.homePos ? node.userData.homePos.clone() : node.position.clone();
+    node.userData.origin = { parent, pos: home, quat: node.quaternion.clone(), scale: node.scale.clone() };
+    delete node.userData.homePos;
+    delete node.userData.explodeOffset;
+    this.root.attach(node);
+    this.select(node);
+    this.markDirty();
+    return true;
+  }
+
+  /** Rimette al loro posto i pezzi estratti (se l'assieme di origine esiste ancora). */
+  reassemble() {
+    let n = 0;
+    for (const node of this.topLevel()) {
+      const o = node.userData.origin;
+      if (!o || !this.contains(o.parent)) continue;
+      o.parent.add(node);
+      node.position.copy(o.pos);
+      node.quaternion.copy(o.quat);
+      node.scale.copy(o.scale);
+      if (o.parent.userData.exploded) {
+        node.userData.homePos = o.pos.clone();
+        node.userData.explodeOffset = new THREE.Vector3();
+      }
+      delete node.userData.origin;
+      n++;
+    }
+    if (n) { this.highlightDirty = true; this.markDirty(); }
+    return n;
+  }
+
+  selectAll() {
+    this.selected = new Set(this.topLevel());
+    this.highlightDirty = true;
+    return this.selected.size;
+  }
+
+  /**
+   * Vista esplosa continua (gesto a due mani): f = 0 chiuso, 1 esploso normale, fino a 1.8.
+   */
+  setExplodeFactor(g, f) {
+    if (!g.userData.isAssembly) return;
+    const kids = g.children.filter(isNode);
+    if (!g.userData.exploded) {
+      for (const k of kids) k.userData.homePos = (this.anims.get(k) || k.position).clone();
+      this.computeExplode(g);
+      g.userData.exploded = true;
+    }
+    for (const k of kids) {
+      this.anims.delete(k);
+      if (!k.userData.homePos) k.userData.homePos = k.position.clone();
+      const off = k.userData.explodeOffset || new THREE.Vector3();
+      k.position.copy(k.userData.homePos).addScaledVector(off, f);
+    }
+    g.userData.explodeF = f;
+    this.highlightDirty = true;
+  }
+
+  /** Fine del gesto: se è quasi chiuso si richiude, altrimenti resta aperto così. */
+  endExplodeGesture(g) {
+    if ((g.userData.explodeF ?? 1) < 0.15) this.collapse(g);
+    else {
+      // la posizione raggiunta diventa il nuovo "esploso"
+      for (const k of g.children.filter(isNode)) {
+        const f = g.userData.explodeF ?? 1;
+        if (k.userData.explodeOffset) k.userData.explodeOffset.multiplyScalar(f);
+      }
+    }
+    delete g.userData.explodeF;
+    this.markDirty();
   }
 
   // ---------- vista esplosa ----------
@@ -379,7 +470,10 @@ export class Workspace {
   }
 
   // ---------- salvataggio ----------
-  markDirty() { this.dirty = true; }
+  markDirty() {
+    this.dirty = true;
+    this.version = (this.version || 0) + 1;
+  }
 
   serialize() {
     // i pezzi in movimento vengono salvati nella loro posizione di arrivo

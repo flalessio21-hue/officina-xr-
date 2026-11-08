@@ -13,6 +13,7 @@ export class MouseInput {
     el.addEventListener('pointermove', (e) => this.onMove(e));
     el.addEventListener('pointerup', (e) => this.onUp(e));
     window.addEventListener('keydown', (e) => this.onKey(e));
+    el.addEventListener('dblclick', (e) => this.onDouble(e));
   }
 
   setRay(e) {
@@ -47,7 +48,10 @@ export class MouseInput {
       : new THREE.Vector3(0, 1, 0);
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, hit.point);
     const offset = node.getWorldPosition(new THREE.Vector3()).sub(hit.point);
-    this.drag = { node, plane, offset, moved: false };
+    this.drag = { node, plane, offset, moved: false, mesh: hit.object, x: e.clientX, y: e.clientY };
+    // clic tenuto fermo su un componente: lo estrae dall'assieme
+    clearTimeout(this.longTimer);
+    this.longTimer = setTimeout(() => this.longPress(), 550);
     this.renderer.domElement.setPointerCapture(e.pointerId);
   }
 
@@ -59,7 +63,10 @@ export class MouseInput {
       if (this.raycaster.ray.intersectPlane(this.drag.plane, p)) {
         const { node } = this.drag;
         node.position.copy(node.parent.worldToLocal(p.add(this.drag.offset)));
-        this.drag.moved = true;
+        if (Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) > 6) {
+          this.drag.moved = true;
+          clearTimeout(this.longTimer);
+        }
       }
       return;
     }
@@ -70,7 +77,41 @@ export class MouseInput {
     this.renderer.domElement.style.cursor = panelId || (hit && hit.object !== this.panel.mesh) ? 'pointer' : 'default';
   }
 
+  longPress() {
+    const d = this.drag;
+    if (!d || d.moved || !d.node.userData.isAssembly) return;
+    let comp = d.mesh;
+    while (comp && comp.parent !== d.node) comp = comp.parent;
+    if (!comp) return;
+    // punto preso col mouse = posizione dell'oggetto meno lo scarto iniziale
+    const hitPoint = d.node.getWorldPosition(new THREE.Vector3()).sub(d.offset);
+    this.workspace.endGrab(d.node);
+    if (!this.workspace.extract(comp)) return;
+    this.workspace.beginGrab(comp);
+    d.offset = comp.getWorldPosition(new THREE.Vector3()).sub(hitPoint);
+    d.node = comp;
+    d.moved = true;
+    this.actions.announce?.(`${comp.name} estratto: trascinalo dove vuoi.`);
+  }
+
+  onDouble(e) {
+    if (this.renderer.xr.isPresenting) return;
+    this.setRay(e);
+    const hit = this.pick();
+    if (!hit || hit.object === this.panel.mesh) return;
+    const node = this.workspace.resolvePick(hit.object);
+    if (!node) return;
+    const ws = this.workspace;
+    if (node.userData.isAssembly) {
+      if (node.userData.exploded) ws.collapse(node); else ws.explode(node);
+    } else if (node.parent?.userData.exploded) {
+      ws.collapse(node.parent);
+    }
+    ws.markDirty();
+  }
+
   onUp(e) {
+    clearTimeout(this.longTimer);
     if (this.drag) {
       this.workspace.endGrab(this.drag.node);
       this.drag = null;

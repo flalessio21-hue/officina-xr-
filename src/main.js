@@ -5,10 +5,11 @@ import { createEnvironment } from './environment.js';
 import { AIOrb } from './ai.js';
 import { Workspace } from './workspace.js';
 import { Panel } from './panel.js';
-import { createActions, PANEL_LAYOUT } from './actions.js';
+import { createActions, PANEL_TABS } from './actions.js';
 import { XRInput } from './xr-input.js';
 import { MouseInput } from './mouse-input.js';
 import { ThemeManager } from './themes.js';
+import { Physics } from './physics.js';
 import { Avatars } from './net/avatars.js';
 import { firebaseConfig } from './net/config.js';
 
@@ -45,7 +46,7 @@ const env = createEnvironment(scene, renderer);
 const workspace = new Workspace(env.workspaceRoot);
 const ai = new AIOrb(scene);
 
-const panel = new Panel(PANEL_LAYOUT, { width: 0.46 });
+const panel = new Panel(PANEL_TABS, { width: 0.5 });
 panel.mesh.position.set(-0.98, 1.1, 0.12); // a sinistra della scrivania, inclinato verso di te
 env.deskRig.add(panel.mesh);
 env.deskRig.updateMatrixWorld(true);
@@ -55,7 +56,25 @@ const themes = new ThemeManager(scene, env);
 const avatars = new Avatars(scene);
 let net = null; // stanze condivise: attive solo con Firebase configurato
 
-const actions = createActions({ workspace, ai, panel, env, themes, get net() { return net; } });
+const physics = new Physics(workspace, env);
+const actions = createActions({ workspace, ai, panel, env, themes, physics, get net() { return net; } });
+if (physics.enabled) { panel.setLabel('gravity', 'Gravità: SÌ'); panel.setActive('gravity', true); }
+
+/** Gli oggetti lasciati cadere nel cestino spariscono. */
+const _bp = new THREE.Vector3();
+function checkBin() {
+  const { center, radius, height } = env.bin;
+  for (const n of workspace.topLevel()) {
+    if (n.userData.grabbed) continue;
+    n.getWorldPosition(_bp);
+    if (_bp.y < height && Math.hypot(_bp.x - center.x, _bp.z - center.z) < radius) {
+      const name = n.name;
+      workspace.selected = new Set([n]);
+      workspace.remove();
+      actions.announce(`${name} buttato nel cestino. Puoi recuperarlo con Annulla.`);
+    }
+  }
+}
 ai.onHeard = (text) => actions.voice(text);
 
 const xrInput = new XRInput(renderer, scene, rig, camera, { panel, workspace, actions, env });
@@ -162,6 +181,9 @@ renderer.setAnimationLoop(() => {
   if (statusTimer <= 0) { panel.setStatus(actions.status()); statusTimer = 0.2; }
   panel.update(dt);
 
+  physics.update(dt);
+  checkBin();
+  actions.tickHistory(dt);
   themes.update(dt);
   avatars.tick(dt);
   net?.tick(dt, myPose(), workspace.grabbing.size > 0);
@@ -178,4 +200,4 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-window.officina = { scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars };
+window.officina = { scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
