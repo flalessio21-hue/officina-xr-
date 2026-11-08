@@ -6,16 +6,60 @@ import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
  * I punti si accumulano nel sistema della mano (l'oggetto ruota con lei), così girandolo
  * si riempiono tutti i lati. Le celle viste più volte diventano "pieno"; il rumore resta fuori.
  */
-export const GRID = 48;
+export const GRID = 64;
+const N6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 
 export class VoxelFusion {
   constructor({ half = 0.14, res = GRID } = {}) {
     this.half = half;
     this.res = res;
     this.hits = new Float32Array(res ** 3);
+    // TSDF: distanza con segno dalla superficie (media pesata) e peso di ogni cella
+    this.sdf = new Float32Array(res ** 3).fill(1);
+    this.w = new Float32Array(res ** 3);
     this.frames = 0;
     this.total = 0;
     this._v = new THREE.Vector3();
+    this._o = new THREE.Vector3();
+    this._d = new THREE.Vector3();
+  }
+
+  /**
+   * Fusione "seria" (TSDF): per ogni punto misurato aggiorno le celle lungo il raggio dall'occhio:
+   * davanti alla superficie = vuoto, appena dietro = pieno. Il rumore del sensore si annulla nella media
+   * e lo spazio libero cancella i punti sbagliati.
+   */
+  integrate(points, count, toLocal, eyeWorld, keep) {
+    const { res, half, sdf, w, hits } = this;
+    const cell = (2 * half) / res;
+    const k = 1 / cell;
+    const trunc = Math.max(cell * 3, 0.012); // spessore della fascia attorno alla superficie
+    const carve = 0.05; // spazio libero davanti alla superficie
+    const step = cell * 0.7;
+    const v = this._v, o = this._o.copy(eyeWorld).applyMatrix4(toLocal), dir = this._d;
+    let added = 0;
+    for (let i = 0; i < count; i++) {
+      v.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
+      if (keep && !keep(v)) continue;
+      v.applyMatrix4(toLocal);
+      if (Math.abs(v.x) > half + trunc || Math.abs(v.y) > half + trunc || Math.abs(v.z) > half + trunc) continue;
+      dir.subVectors(v, o).normalize();
+      added++;
+      for (let s = -carve; s <= trunc; s += step) {
+        const x = Math.floor((v.x + dir.x * s + half) * k), y = Math.floor((v.y + dir.y * s + half) * k), z = Math.floor((v.z + dir.z * s + half) * k);
+        if (x < 0 || y < 0 || z < 0 || x >= res || y >= res || z >= res) continue;
+        const j = x + y * res + z * res * res;
+        const d = s < -trunc ? 1 : -s / trunc; // >0 davanti (vuoto), <0 dietro (pieno)
+        const wt = s < -trunc ? 0.5 : 1;
+        const W = w[j];
+        sdf[j] = (sdf[j] * W + d * wt) / (W + wt);
+        w[j] = Math.min(60, W + wt);
+        if (Math.abs(s) < step) hits[j] += 1; // per l'anteprima
+      }
+    }
+    this.frames++;
+    this.total += added;
+    return added;
   }
 
   /**
@@ -43,13 +87,41 @@ export class VoxelFusion {
 
   /** Celle piene: viste abbastanza volte, solo il blocco connesso più grande (niente rumore). */
   occupancy() {
-    const { res, hits } = this;
+    const { res, hits, sdf, w } = this;
     const n3 = res ** 3;
-    let max = 0;
-    for (let i = 0; i < n3; i++) max = Math.max(max, hits[i]);
-    const thr = Math.max(2, Math.min(6, max * 0.04));
     const occ = new Uint8Array(n3);
-    for (let i = 0; i < n3; i++) occ[i] = hits[i] >= thr ? 1 : 0;
+    let tsdf = false;
+    for (let i = 0; i < n3; i++) if (w[i] > 0) { tsdf = true; break; }
+    if (tsdf) {
+      // pieno osservato = dietro la superficie, visto almeno due volte
+      const solid = new Uint8Array(n3);
+      for (let i = 0; i < n3; i++) solid[i] = w[i] >= 2 && sdf[i] < 0 ? 1 : 0;
+      // "fuori" = raggiungibile dal bordo senza attraversare il pieno; tutto il resto è l'oggetto
+      // (così l'interno mai visto, chiuso dalla superficie, diventa pieno)
+      const outside = new Uint8Array(n3);
+      const stack = [];
+      for (let z = 0; z < res; z++) for (let y = 0; y < res; y++) for (let x = 0; x < res; x++) {
+        if (x && y && z && x < res - 1 && y < res - 1 && z < res - 1) continue;
+        const i = x + y * res + z * res * res;
+        if (!solid[i]) { outside[i] = 1; stack.push(i); }
+      }
+      while (stack.length) {
+        const j = stack.pop();
+        const x = j % res, y = Math.floor(j / res) % res, z = Math.floor(j / (res * res));
+        for (const [dx, dy, dz] of N6) {
+          const X = x + dx, Y = y + dy, Z = z + dz;
+          if (X < 0 || Y < 0 || Z < 0 || X >= res || Y >= res || Z >= res) continue;
+          const q = X + Y * res + Z * res * res;
+          if (!outside[q] && !solid[q]) { outside[q] = 1; stack.push(q); }
+        }
+      }
+      for (let i = 0; i < n3; i++) occ[i] = outside[i] ? 0 : 1;
+    } else {
+      let max = 0;
+      for (let i = 0; i < n3; i++) max = Math.max(max, hits[i]);
+      const thr = Math.max(2, Math.min(6, max * 0.04));
+      for (let i = 0; i < n3; i++) occ[i] = hits[i] >= thr ? 1 : 0;
+    }
     // componente connessa più grande (26 vicini)
     const label = new Int32Array(n3);
     let best = 0, bestSize = 0, cur = 0;
@@ -99,7 +171,6 @@ function unpackBits(b64, n) {
   return occ;
 }
 
-const N6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 function dilate(occ, res) {
   const out = occ.slice();
   for (let z = 0; z < res; z++) for (let y = 0; y < res; y++) for (let x = 0; x < res; x++) {
@@ -156,7 +227,7 @@ export function geometryFromVoxels({ res, half, bits }, { ground = false } = {})
   const n = res + 2; // un bordo vuoto: superficie sempre chiusa
   const occ = solidify(unpackBits(bits, res ** 3), res);
   const mc = new MarchingCubes(n, new THREE.MeshBasicMaterial(), false, false, 60000);
-  mc.isolation = 0.4;
+  mc.isolation = 0.5; // a metà tra pieno e vuoto: il bordo vero, non gonfiato
   mc.reset();
   for (let z = 0; z < res; z++) for (let y = 0; y < res; y++) for (let x = 0; x < res; x++) {
     if (occ[x + y * res + z * res * res]) mc.field[(x + 1) + (y + 1) * n + (z + 1) * n * n] = 1;

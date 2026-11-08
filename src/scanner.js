@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createPart, createAssembly } from './parts.js';
 import { applyPhotos } from './photo-texture.js';
-import { DepthCapture } from './depth-capture.js';
+import { DepthCapture, fingerRatio } from './depth-capture.js';
 import { VoxelFusion } from './voxel-fusion.js';
 
 /**
@@ -159,6 +159,12 @@ export class Scanner {
     this.centerLocal = null;
     this.worldCenter = null;
     this.saidDone = false;
+    this.ratios = [];
+    this.calibrated = false;
+    this.badFrames = 0;
+    this.prevPose = null;
+    this.skipped = 0;
+    this.depth.scale = 1;
     this.segs.forEach((s) => { s.material.opacity = 0.25; });
     this.ring.visible = true;
     this.preview ||= this.buildPreview();
@@ -291,8 +297,30 @@ export class Scanner {
       const inv = wristM.clone().invert();
       const palm = this.palmPoint();
       const rig = this.xrInput.rig?.matrixWorld;
+      const tips = ['thumb-tip', 'index-finger-tip', 'middle-finger-tip', 'ring-finger-tip', 'pinky-finger-tip']
+        .map((n) => this.joint(this.hand, n, new THREE.Vector3())).filter(Boolean);
+      // solo letture "ferme": se giri troppo in fretta, il sensore (30 al secondo) resta indietro e sporca la forma
+      const now = performance.now() / 1000;
+      const pose = { q: quat.clone(), p: new THREE.Vector3().setFromMatrixPosition(wristM), t: now };
+      const prev = this.prevPose;
+      this.prevPose = pose;
+      const fast = prev && (prev.q.angleTo(pose.q) / Math.max(0.03, now - prev.t) > 1.1 || prev.p.distanceTo(pose.p) / Math.max(0.03, now - prev.t) > 0.25);
       this.depth.sample(rig).then((res) => {
         if (!res || this.state !== 'capturing' || this.mode !== 'depth') return;
+        // calibrazione: la profondità letta sulle dita deve coincidere con dove il visore sa che sono
+        if (!this.calibrated && res.depth) {
+          const r = fingerRatio(res, tips);
+          if (r != null) this.ratios.push(r);
+          if (this.ratios.length >= 6) {
+            const sorted = this.ratios.slice().sort((a, b) => a - b);
+            const med = sorted[Math.floor(sorted.length / 2)];
+            if (med > 0.7 && med < 1.4) { this.depth.scale = med; this.calibrated = true; }
+            else if (++this.badFrames > 3) { this.cancel('I dati del sensore di profondità non tornano con la posizione delle tue mani: non posso scansionare con precisione.'); return; }
+            else this.ratios = [];
+          }
+          if (!this.calibrated) return; // finché non è calibrato non metto niente nella forma
+        }
+        if (fast) { this.skipped++; if (this.skipped % 12 === 6) this.ai.setSubtitle('Più piano: lo giri troppo in fretta.'); return; }
         if (!this.centerLocal) {
           // primo sguardo: il centro dell'oggetto è il centro dei punti vicino al palmo (mano esclusa)
           if (!palm) return;
@@ -310,7 +338,7 @@ export class Scanner {
           return;
         }
         const toLocal = new THREE.Matrix4().makeTranslation(-this.centerLocal.x, -this.centerLocal.y, -this.centerLocal.z).multiply(inv);
-        this.fusion.add(res.points, res.count, toLocal, keep);
+        this.fusion.integrate(res.points, res.count, toLocal, res.eye || _h, keep);
       }).catch(() => {});
     }
 
@@ -349,7 +377,18 @@ export class Scanner {
       } catch { /* niente colore */ }
     }
     const part = createPart('voxel', { ...params, mat: { roughness: 0.6, metalness: 0 } }, color, 'Forma scansionata');
-    if (this.startQuat) part.quaternion.copy(this.startQuat); // com'era in mano all'inizio
+    if (this.startQuat) {
+      // com'era in mano all'inizio, ma raddrizzato: il lato che puntava più in alto diventa "su"
+      const q = this.startQuat.clone();
+      const up = new THREE.Vector3(0, 1, 0);
+      let best = null, bd = -2;
+      for (const a of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+        const wv = new THREE.Vector3(...a).applyQuaternion(q);
+        const d = wv.dot(up);
+        if (d > bd) { bd = d; best = wv; }
+      }
+      part.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(best, up).multiply(q));
+    }
     const node = createAssembly('Oggetto scansionato', [part]);
     node.userData.scanned = true;
     const box = new THREE.Box3().setFromObject(node);

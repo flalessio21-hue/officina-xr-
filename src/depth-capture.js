@@ -127,7 +127,7 @@ export class DepthCapture {
     } finally {
       this.busy = false;
     }
-    return backProject(this.pixels, SIZE, m.mode.value, proj, viewWorld, near, far);
+    return backProject(this.pixels, SIZE, m.mode.value, proj, viewWorld, near, far, this.scale || 1);
   }
 }
 
@@ -149,18 +149,48 @@ DepthCapture.prototype.sampleCPU = function (frame, view, rigMatrixWorld) {
       try { m = info.getDepthInMeters(u, v); } catch { continue; }
       if (!(m > 0.05 && m < 3)) continue;
       dir.set(u * 2 - 1, 1 - v * 2, 0.5).applyMatrix4(inv);
-      dir.multiplyScalar(m / -dir.z).applyMatrix4(viewWorld);
+      dir.multiplyScalar((m * (this.scale || 1)) / -dir.z).applyMatrix4(viewWorld);
       out[n * 3] = dir.x; out[n * 3 + 1] = dir.y; out[n * 3 + 2] = dir.z;
       n++;
     }
   }
-  return { points: out, count: n };
+  return { points: out, count: n, eye: new THREE.Vector3().setFromMatrixPosition(viewWorld) };
 };
 
+/**
+ * Calibrazione con le dita: il visore sa dove sono le punte delle dita; confronto la loro distanza
+ * vera con quella letta dal sensore nello stesso pixel. Ritorna il rapporto vero/letto (≈1 se va bene).
+ */
+export function fingerRatio(res, joints) {
+  if (!res?.depth) return null;
+  const inv = res.viewWorld.clone().invert();
+  const ratios = [];
+  const v = new THREE.Vector3();
+  for (const j of joints) {
+    v.copy(j).applyMatrix4(inv);
+    const real = -v.z;
+    if (real < 0.1) continue;
+    v.applyMatrix4(res.proj);
+    const x = Math.floor((v.x * 0.5 + 0.5) * res.size), y = Math.floor((v.y * 0.5 + 0.5) * res.size);
+    if (x < 1 || y < 1 || x >= res.size - 1 || y >= res.size - 1) continue;
+    // il valore più vicino attorno al pixel (la punta del dito è davanti all'oggetto)
+    let best = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const d = res.depth[(y + dy) * res.size + (x + dx)];
+      if (d > 0 && (!best || d < best)) best = d;
+    }
+    if (best > 0) ratios.push((real - 0.008) / best); // il giunto è al centro del dito, la superficie ~8 mm più avanti
+  }
+  if (ratios.length < 2) return null;
+  ratios.sort((a, b) => a - b);
+  return ratios[Math.floor(ratios.length / 2)];
+}
+
 /** Pixel impacchettati → punti 3D nel mondo. Esportata per i test. */
-export function backProject(px, size, mode, proj, viewWorld, near, far) {
+export function backProject(px, size, mode, proj, viewWorld, near, far, scale = 1) {
   const inv = proj.clone().invert();
   const out = new Float32Array(size * size * 3);
+  const depth = new Float32Array(size * size); // distanza lungo l'asse della vista, per pixel (0 = niente)
   const v = new THREE.Vector3();
   const dir = new THREE.Vector3();
   let n = 0;
@@ -177,17 +207,20 @@ export function backProject(px, size, mode, proj, viewWorld, near, far) {
         const lin = Number.isFinite(far) ? (2 * near * far) / (far + near - zn * (far - near)) : near / (1 - val);
         if (!(lin > 0.05 && lin < 3)) continue;
         dir.set(nx, ny, 0.5).applyMatrix4(inv); // un punto qualsiasi del raggio
-        v.copy(dir).multiplyScalar(lin / -dir.z);
+        depth[y * size + x] = lin;
+        v.copy(dir).multiplyScalar((lin * scale) / -dir.z);
       } else {
         const meters = val * 8;
         if (!(meters > 0.05 && meters < 3)) continue;
         dir.set(nx, ny, 0.5).applyMatrix4(inv);
-        v.copy(dir).multiplyScalar(meters / -dir.z);
+        depth[y * size + x] = meters;
+        v.copy(dir).multiplyScalar((meters * scale) / -dir.z);
       }
       v.applyMatrix4(viewWorld);
       out[n * 3] = v.x; out[n * 3 + 1] = v.y; out[n * 3 + 2] = v.z;
       n++;
     }
   }
-  return { points: out, count: n };
+  const eye = new THREE.Vector3().setFromMatrixPosition(viewWorld);
+  return { points: out, count: n, depth, size, proj, viewWorld, eye };
 }

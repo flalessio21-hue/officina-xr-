@@ -30,7 +30,8 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.autoUpdate = false; // le ombre si aggiornano solo quando qualcosa si muove (vedi il ciclo)
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 renderer.xr.enabled = true;
@@ -682,6 +683,8 @@ window.addEventListener('resize', () => {
 
 const clock = new THREE.Clock();
 let statusTimer = 0;
+let shadowTimer = 0;
+const perf = { t: 0, n: 0, sum: 0 };
 let saveTimer = 0;
 
 renderer.setAnimationLoop(() => {
@@ -717,7 +720,22 @@ renderer.setAnimationLoop(() => {
   if (saveTimer <= 0 && workspace.dirty && !net?.room) {
     saveTimer = 3;
     workspace.dirty = false;
-    try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(workspace.serialize())); } catch { /* quota */ }
+    // il salvataggio aspetta un momento libero, così non blocca l'immagine
+    const save = () => { try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(workspace.serialize())); } catch { /* quota */ } };
+    if (window.requestIdleCallback) requestIdleCallback(save, { timeout: 2000 }); else setTimeout(save, 200);
+  }
+
+  // ombre: ogni fotogramma solo se qualcosa si muove, altrimenti due volte al secondo
+  shadowTimer -= dt;
+  const moving = workspace.grabbing.size > 0 || appearing.size > 0 || workspace.anims.size > 0 || physics.enabled || deskGrab.holds.size > 0;
+  if (moving || shadowTimer <= 0) { renderer.shadowMap.needsUpdate = true; shadowTimer = 0.5; }
+
+  // qualità automatica: se il visore fatica (fotogrammi lenti), spengo le ombre della lampada
+  perf.t += dt; perf.n++; perf.sum += dt;
+  if (perf.t > 3) {
+    const avg = perf.sum / perf.n;
+    if (renderer.xr.isPresenting && avg > 1 / 55 && renderer.shadowMap.enabled) { renderer.shadowMap.enabled = false; console.info('qualità ridotta: ombre spente'); }
+    perf.t = perf.n = perf.sum = 0;
   }
 
   if (!renderer.xr.isPresenting) controls.update();

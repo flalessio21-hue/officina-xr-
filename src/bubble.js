@@ -110,7 +110,7 @@ export class Bubble {
       uFace: { value: new THREE.Vector3(0, 0, 1) }, uTint: { value: new THREE.Color(0.25, 0.65, 1.0) },
     };
     this.mesh = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(radius, 40),
+      new THREE.IcosahedronGeometry(radius, 18),
       new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false, fog: false }),
     );
     this.mesh.renderOrder = 2;

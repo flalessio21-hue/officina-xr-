@@ -31,6 +31,8 @@ export class Panel {
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = 4;
+    this.texture.generateMipmaps = false; // niente mipmap da rigenerare a ogni ridisegno
+    this.texture.minFilter = THREE.LinearFilter;
 
     this.mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(width, (width * this.H) / this.W),
@@ -95,12 +97,14 @@ export class Panel {
   }
 
   update(dt) {
+    // il lampeggio di un pulsante premuto: si ridisegna solo all'inizio e alla fine, non a ogni fotogramma
     for (const [id, t] of this.flash) {
       const n = t - dt;
-      if (n <= 0) this.flash.delete(id); else this.flash.set(id, n);
-      this.dirty = true;
+      if (n <= 0) { this.flash.delete(id); this.dirty = true; } else this.flash.set(id, n);
     }
-    if (this.dirty) this.draw();
+    // ridisegnare il pannello costa (immagine grande caricata sulla GPU): al massimo ~12 volte al secondo
+    this.sinceDraw = (this.sinceDraw ?? 1) + dt;
+    if (this.dirty && this.sinceDraw >= 0.08) { this.draw(); this.sinceDraw = 0; }
   }
 
   draw() {
