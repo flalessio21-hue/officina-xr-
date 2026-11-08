@@ -1,6 +1,7 @@
 import { THEMES, ThemeManager } from './themes.js';
 
 import { LIBRARY } from './library.js';
+import { FEATURES } from './features.js';
 
 const b = (id, label) => ({ id, label });
 
@@ -12,7 +13,7 @@ export const PANEL_TABS = [
       b('box', 'Cubo'), b('sphere', 'Sfera'), b('cylinder', 'Cilindro'), b('cone', 'Cono'),
       b('pyramid', 'Piramide'), b('torus', 'Toro'), b('tube', 'Tubo'), b('gear', 'Ingranaggio'),
       b('screw', 'Vite + dado'), b('duplicate', 'Duplica'), b('color', 'Colore'), b('undo', 'Annulla'),
-      b('scan', 'Scansiona oggetto'),
+      ...(FEATURES.claudeAI ? [b('scan', 'Scansiona oggetto')] : []),
     ],
   },
   {
@@ -370,7 +371,9 @@ export function createActions(ctx) {
       const th = !isShape && (context || t.split(/\s+/).length <= 3) ? ThemeManager.fromText(t) : null;
       if (th) return run('theme:' + th, { speak: true });
     }
-    if (has(/scansion|scanneriz|scanner|digitalizz|rendil[oa] virtual/)) return run('scan', { speak: true });
+    if (has(/scansion|scanneriz|scanner|digitalizz|rendil[oa] virtual/)) {
+      return FEATURES.claudeAI ? run('scan', { speak: true }) : say('La scansione degli oggetti arriverà più avanti.');
+    }
     if (has(/passthrough|pass through|realta mista|realta aumentata|stanza reale|mia stanza|vedere (la )?(mia )?(stanza|casa)/)) return run('mr', { speak: true });
     if (has(/gravit/)) {
       const on = !has(/spegn|togli|disattiv|senza|via la/);

@@ -8,6 +8,7 @@
  */
 import { LIBRARY } from './library.js';
 import { THEMES } from './themes.js';
+import { FEATURES } from './features.js';
 
 const KEY_STORE = 'officina-anthropic-key';
 const MODEL = 'claude-opus-5-5';
@@ -116,7 +117,7 @@ export class Brain {
     this.history = [];
   }
 
-  get enabled() { return !!this.key; }
+  get enabled() { return FEATURES.claudeAI && !!this.key; }
 
   async getClient() {
     if (!this.client) {

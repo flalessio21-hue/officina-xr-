@@ -9,5 +9,5 @@ Il codice completo (anche l'app nativa per il Quest) è nel repository privato `
 
 ## AI, realtà mista e scansione
 
-- Nella pagina iniziale puoi incollare una **chiave Claude** (console.anthropic.com): resta solo su quel visore.
-- **REALTÀ MISTA** mostra la tua stanza vera; **Scansiona oggetto** ricostruisce con pezzi veri l'oggetto che tieni in mano.
+- **REALTÀ MISTA** mostra la tua stanza vera.
+- In pausa (pronte, da riattivare in `src/features.js`): AI collegata a Claude e **Scansiona oggetto**.

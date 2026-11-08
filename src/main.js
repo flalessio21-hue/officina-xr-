@@ -10,6 +10,7 @@ import { MouseInput } from './mouse-input.js';
 import { ThemeManager } from './themes.js';
 import { Physics } from './physics.js';
 import { Brain } from './brain.js';
+import { FEATURES } from './features.js';
 import { HeadsetCamera } from './camera.js';
 import { createPart, createAssembly } from './parts.js';
 import { Avatars } from './net/avatars.js';
@@ -284,6 +285,8 @@ updateXRButtons();
 vrBtn.addEventListener('click', () => startSession('immersive-vr').catch((e) => alert('Non riesco a entrare in VR: ' + e.message)));
 mrBtn.addEventListener('click', () => startSession('immersive-ar').catch((e) => alert('Realtà mista non disponibile: ' + e.message)));
 
+// AI con Claude e scansione: in pausa (vedi src/features.js)
+document.getElementById('ai-settings').hidden = !FEATURES.claudeAI;
 const keyInput = document.getElementById('ai-key');
 const keyStatus = document.getElementById('ai-status');
 const showKey = () => { keyStatus.textContent = brain.enabled ? 'AI collegata ✓' : 'AI di base (senza chiave)'; };
