@@ -6,3 +6,8 @@ Spazio nero (o spazio profondo, sott'acqua, tramonto, aurora), scrivania in noce
 oggetti da creare, ingrandire, raggruppare ed esplodere fino all'ultima vite. Funziona con mani e controller.
 
 Il codice completo (anche l'app nativa per il Quest) è nel repository privato `metaquest`.
+
+## AI, realtà mista e scansione
+
+- Nella pagina iniziale puoi incollare una **chiave Claude** (console.anthropic.com): resta solo su quel visore.
+- **REALTÀ MISTA** mostra la tua stanza vera; **Scansiona oggetto** ricostruisce con pezzi veri l'oggetto che tieni in mano.

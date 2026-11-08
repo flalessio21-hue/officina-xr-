@@ -12,6 +12,7 @@ export const PANEL_TABS = [
       b('box', 'Cubo'), b('sphere', 'Sfera'), b('cylinder', 'Cilindro'), b('cone', 'Cono'),
       b('pyramid', 'Piramide'), b('torus', 'Toro'), b('tube', 'Tubo'), b('gear', 'Ingranaggio'),
       b('screw', 'Vite + dado'), b('duplicate', 'Duplica'), b('color', 'Colore'), b('undo', 'Annulla'),
+      b('scan', 'Scansiona oggetto'),
     ],
   },
   {
@@ -47,6 +48,7 @@ export const PANEL_TABS = [
       b('theme:buio', 'Buio'), b('theme:spazio', 'Spazio'), b('theme:acqua', "Sott'acqua"), b('theme:tramonto', 'Tramonto'),
       b('theme:aurora', 'Aurora'), b('gravity', 'Gravità: NO'), b('lamp', 'Lampada'), b('home', 'Torna qui'),
       b('turnL', 'Gira ◀'), b('turnR', 'Gira ▶'), b('deskUp', 'Scrivania ▲'), b('deskDown', 'Scrivania ▼'),
+      b('mr', 'Realtà mista'), b('deskToggle', 'Scrivania: SÌ'),
     ],
   },
   {
@@ -277,6 +279,9 @@ export function createActions(ctx) {
         : 'Con due mani ora apri gli oggetti: prendili con entrambe le mani e allargale.';
     },
     gestures: () => GESTURES,
+    scan: () => (ctx.scan ? (ctx.scan(), null) : 'La scansione non è disponibile.'),
+    mr: () => ctx.mixedReality?.() || null,
+    deskToggle: () => ctx.toggleDesk?.() || null,
     gravity: () => {
       const on = ctx.physics?.toggle();
       panel.setLabel('gravity', on ? 'Gravità: SÌ' : 'Gravità: NO');
@@ -365,7 +370,23 @@ export function createActions(ctx) {
       const th = !isShape && (context || t.split(/\s+/).length <= 3) ? ThemeManager.fromText(t) : null;
       if (th) return run('theme:' + th, { speak: true });
     }
-    if (has(/drone|esempio|demo/)) return run('sample', { speak: true });
+    if (has(/scansion|scanneriz|scanner|digitalizz|rendil[oa] virtual/)) return run('scan', { speak: true });
+    if (has(/passthrough|pass through|realta mista|realta aumentata|stanza reale|mia stanza|vedere (la )?(mia )?(stanza|casa)/)) return run('mr', { speak: true });
+    if (has(/gravit/)) {
+      const on = !has(/spegn|togli|disattiv|senza|via la/);
+      if (!!ctx.physics?.enabled !== on) return run('gravity', { speak: true });
+      return say(on ? 'La gravità è già attiva.' : 'La gravità è già spenta.');
+    }
+    if (has(/annulla|torna indietro/)) return run('undo', { speak: true });
+    if (has(/ripeti|rifai/)) return run('redo', { speak: true });
+    {
+      // oggetti della libreria: "carica il motore", "fammi vedere il razzo"…
+      const names = { fotocamer: 'camera', 'macchina fotografica': 'camera', automobil: 'car', macchin: 'car', '\bauto\b': 'car',
+        robot: 'robot', braccio: 'robot', ventilator: 'fan', razzo: 'rocket', motore: 'engine', riduttor: 'gearbox',
+        orologio: 'clock', tastiera: 'keyboard', satellit: 'satellite', casa: 'house', sedia: 'chair', lampadina: 'bulb', drone: 'drone' };
+      const key = Object.keys(names).find((k) => new RegExp(k).test(t));
+      if (key && !has(/\b(crea un cubo|sfera)\b/)) return run('lib:' + names[key], { speak: true });
+    }
     if (has(/(esplodi|smonta|disassembla).*(tutto|completamente|dettaglio)|massimo dettaglio|ogni (singol|pezz)/)) return run('explodeAll', { speak: true });
     if (has(/esplodi|smonta|disassembla|apri/)) return run('explode', { speak: true });
     if (has(/ricomponi|rimonta|riassembla|assembla|richiudi|chiudi/)) return run('collapse', { speak: true });
@@ -392,7 +413,7 @@ export function createActions(ctx) {
     }
     const shape = SHAPES.find(([, re]) => re.test(t));
     if (shape) return run(shape[0], { speak: true });
-    return say('Non ho capito. Prova con: crea un ingranaggio, raggruppa, esplodi tutto, ricomponi.');
+    return say('Questo non lo so fare ancora. Dimmi cosa creare, cosa smontare o dove portarti, e lo faccio.');
   }
 
   return {

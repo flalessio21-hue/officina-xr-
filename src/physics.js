@@ -66,6 +66,7 @@ export class Physics {
     w.addBody(floor);
     this.statics.push(floor);
     for (const mesh of [this.env.deskTop, this.env.mat]) {
+      if (!mesh.visible) continue; // scrivania nascosta (realtà mista)
       mesh.updateWorldMatrix(true, false);
       _box.setFromObject(mesh);
       const size = _box.getSize(new THREE.Vector3());

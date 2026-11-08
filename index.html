@@ -46,6 +46,15 @@
     #account .link { display: flex; gap: 6px; margin-top: 10px; }
     #account .link input { flex: 1; min-width: 0; font-size: 12px; }
     #account .link button { width: auto; padding: 0 14px; background: #45d483; color: #06121f; }
+    #xr-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 10px; }
+    #xr-bar button { padding: 12px 18px; border-radius: 10px; border: 1px solid #fff8; background: rgba(0,0,0,0.4); color: #fff; font: 600 13px system-ui, sans-serif; letter-spacing: 0.04em; cursor: pointer; }
+    #xr-bar button:disabled { opacity: 0.5; cursor: default; }
+    #enter-mr { border-color: #7fe3ff; color: #7fe3ff; }
+    #intro .row { display: flex; gap: 6px; margin: 8px 0 4px; }
+    #intro .row input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid #2b3440; background: #151a21; color: #e6edf5; }
+    #intro .row button { padding: 8px 12px; border-radius: 8px; border: 1px solid #2b3440; background: #1c222b; color: #e6edf5; cursor: pointer; }
+    #intro .small { font-size: 12px; margin: 2px 0 6px; }
+    #intro a { color: #8fc6ff; }
     #chat { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); width: min(520px, calc(100% - 32px)); display: flex; gap: 8px; }
     #chat input { flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid #2b3440; background: rgba(14, 16, 20, 0.9); color: #e6edf5; font-size: 14px; }
     #chat button { padding: 10px 14px; border-radius: 10px; border: 1px solid #2b3440; background: #1c222b; color: #e6edf5; cursor: pointer; }
@@ -68,9 +77,19 @@
     <p>Il tuo mondo privato: una scrivania, un'AI che brilla in lontananza, una libreria di oggetti già montati da smontare fino all'ultima vite, ambienti e gravità.</p>
     <p><b>Mani:</b> pizzica per prendere · <b>doppio pizzico</b> apre/chiude un oggetto · <b>pizzico tenuto fermo</b> stacca un componente · due mani per scalare o aprire · tocca i pulsanti col dito · punta il pavimento e pizzica per muoverti.</p>
     <p><b>Controller:</b> grilletto = raggio (afferra, pulsanti, teletrasporto) · grip = presa diretta · stick sinistro = cammina · stick destro = gira.</p>
+    <form id="ai-form" class="row">
+      <input id="ai-key" type="password" placeholder="Chiave AI Claude (sk-ant-…)" autocomplete="off">
+      <button type="submit">Salva</button>
+    </form>
+    <p class="small"><span id="ai-status"></span> · <a href="#" id="ai-forget">dimentica chiave</a> · la chiave resta solo su questo visore.</p>
+    <p class="row"><button id="cam-btn" type="button">Abilita fotocamera (scansione)</button></p>
     <p><b>Desktop:</b> clic per selezionare e trascinare sul piano (<kbd>Alt</kbd>+trascina = in altezza), <kbd>Shift</kbd>+clic selezione multipla, trascina il vuoto per orbitare. Tasti: <kbd>E</kbd> esplodi · <kbd>R</kbd> ricomponi · <kbd>G</kbd> raggruppa · <kbd>D</kbd> duplica · <kbd>Canc</kbd> elimina.</p>
   </div>
   <div id="account" hidden></div>
+  <div id="xr-bar">
+    <button id="enter-vr" disabled>…</button>
+    <button id="enter-mr" hidden>REALTÀ MISTA</button>
+  </div>
   <form id="chat" autocomplete="off">
     <input id="chat-input" placeholder="Scrivi all'AI… (es. &quot;crea un ingranaggio&quot;, &quot;esplodi tutto&quot;)" />
     <button type="submit">Invia</button>
