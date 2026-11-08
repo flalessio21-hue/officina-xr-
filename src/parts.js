@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { applyPhotos } from './photo-texture.js';
+import { geometryFromVoxels } from './voxel-fusion.js';
 
 export const PALETTE = [0xd0d4da, 0x4f8cff, 0xff6b4a, 0x45d483, 0xffc845, 0xb57bff, 0x2b2f36, 0xb87333];
 
 export const KIND_NAMES = {
   box: 'Cubo', cylinder: 'Cilindro', sphere: 'Sfera', cone: 'Cono',
-  torus: 'Toro', tube: 'Tubo', gear: 'Ingranaggio', rbox: 'Blocco', lathe: 'Corpo tornito', extrude: 'Sagoma',
+  torus: 'Toro', tube: 'Tubo', gear: 'Ingranaggio', rbox: 'Blocco', lathe: 'Corpo tornito', extrude: 'Sagoma', voxel: 'Scansione 3D',
 };
 
 export const DEFAULTS = {
@@ -49,6 +50,8 @@ function extrudeFlat(shape, h) {
 
 const builders = {
   box: (p) => new THREE.BoxGeometry(p.w, p.h, p.d),
+  // forma ricostruita dal sensore di profondità (griglia 3D → superficie)
+  voxel: (p) => geometryFromVoxels(p),
   // blocco con spigoli arrotondati (telefoni, telecomandi, scatole…)
   rbox: (p) => new RoundedBoxGeometry(p.w, p.h, p.d, 4, Math.min(p.radius || 0.002, p.w / 2, p.h / 2, p.d / 2) * 0.999),
   // solido di rotazione da un profilo [raggio, altezza] (tazze, bottiglie, vasi, lampadine…)

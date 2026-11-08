@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { createPart, createAssembly } from './parts.js';
 import { applyPhotos } from './photo-texture.js';
+import { DepthCapture } from './depth-capture.js';
+import { VoxelFusion } from './voxel-fusion.js';
 
 /**
  * Scansione di un oggetto vero tenuto in mano (realtà mista).
@@ -24,6 +26,7 @@ export class Scanner {
     this.state = 'idle'; // idle | capturing | building
     this.holdTime = new Map();
     this.cooldown = 0;
+    this.depth = new DepthCapture(xrInput.renderer);
     this.buildUI();
   }
 
@@ -104,9 +107,13 @@ export class Scanner {
   /** Avvio: automatico (mano) o a voce (hand = null: foto a intervalli). */
   async start(hand = null) {
     if (this.state !== 'idle') return 'Sto già scansionando.';
+    // prima scelta: il sensore di profondità del visore (niente chiavi, tutto in locale)
+    if (this.depth.supported()) return this.startDepth(hand);
     if (!this.brain.enabled) {
       this.cooldown = 30;
-      this.ai.say('Per ricostruire l\'oggetto mi serve la chiave dell\'intelligenza artificiale: inseriscila nella pagina iniziale.');
+      this.ai.say(this.isMixedReality()
+        ? 'Il browser del visore non mi dà il sensore di profondità. Aggiorna il browser del Quest e rientra in realtà mista.'
+        : 'Per scansionare entra in realtà mista.');
       return null;
     }
     try {
@@ -117,6 +124,7 @@ export class Scanner {
       return null;
     }
     this.state = 'capturing';
+    this.mode = 'photo';
     this.hand = hand;
     this.shots = [];
     this.elapsed = 0;
@@ -136,8 +144,142 @@ export class Scanner {
     if (msg) this.ai.say(msg);
   }
 
+  // ---------- scansione 3D con il sensore di profondità ----------
+  startDepth(hand) {
+    this.state = 'capturing';
+    this.mode = 'depth';
+    this.hand = hand;
+    this.elapsed = 0;
+    this.lost = 0;
+    this.views = [];
+    this.nextSample = 0;
+    this.fusion = new VoxelFusion({ half: 0.14 });
+    this.startQuat = null;
+    this.centerLocal = null;
+    this.worldCenter = null;
+    this.segs.forEach((s) => { s.material.opacity = 0.25; });
+    this.ring.visible = true;
+    this.ai.setSubtitle('Scansione 3D: giralo piano tra le mani.');
+    this.ai.say(hand ? 'Lo vedo. Giralo piano, così lo misuro da tutti i lati.' : 'Tienilo fermo davanti a te e giraci intorno piano.');
+    return null;
+  }
+
+  /** Punti delle mani (da escludere: non fanno parte dell'oggetto). */
+  handPoints() {
+    const pts = [];
+    for (const c of this.xrInput.controllers) {
+      const joints = c.userData.hand?.joints;
+      if (!joints) continue;
+      for (const j of Object.values(joints)) if (j.visible) pts.push(j.getWorldPosition(new THREE.Vector3()));
+      // avambraccio: qualche punto dietro il polso
+      const w = joints.wrist, m = joints['middle-finger-metacarpal'];
+      if (w?.visible && m?.visible) {
+        const a = w.getWorldPosition(new THREE.Vector3()), b = m.getWorldPosition(new THREE.Vector3());
+        const back = a.clone().sub(b).normalize();
+        for (let k = 1; k <= 5; k++) pts.push(a.clone().addScaledVector(back, k * 0.035));
+      }
+    }
+    return pts;
+  }
+
+  updateDepth(dt) {
+    let center = null, quat = null, wristM = null;
+    if (this.hand) {
+      center = this.holdingReal(this.hand) || (this.lost < 1.5 && this.lastCenter) || null;
+      const wrist = this.hand.userData.hand.joints?.wrist;
+      if (this.holdingReal(this.hand)) this.lost = 0; else this.lost += dt;
+      if (wrist?.visible) {
+        wrist.updateMatrixWorld();
+        wristM = wrist.matrixWorld.clone();
+        quat = wrist.getWorldQuaternion(new THREE.Quaternion());
+      }
+      if (center) this.lastCenter = center.clone();
+    }
+    this.camera.getWorldPosition(_h);
+    this.camera.getWorldDirection(_f);
+    if (!this.hand && !this.worldCenter) this.worldCenter = _h.clone().addScaledVector(_f, 0.4);
+    const target = center || this.worldCenter || _w.copy(_h).addScaledVector(_f, 0.38);
+    this.ring.position.lerp(target, Math.min(1, dt * 12));
+    this.ring.lookAt(_h);
+
+    // sistema dell'oggetto: con la mano segue il polso; senza, resta fermo nel mondo
+    let toLocal = null;
+    if (this.hand && wristM && center) {
+      const inv = wristM.clone().invert();
+      if (!this.centerLocal) { this.centerLocal = center.clone().applyMatrix4(inv); this.startQuat = quat.clone(); }
+      toLocal = new THREE.Matrix4().makeTranslation(-this.centerLocal.x, -this.centerLocal.y, -this.centerLocal.z).multiply(inv);
+    } else if (!this.hand) {
+      toLocal = new THREE.Matrix4().makeTranslation(-this.worldCenter.x, -this.worldCenter.y, -this.worldCenter.z);
+      quat = this.camera.getWorldQuaternion(new THREE.Quaternion());
+      if (!this.startQuat) this.startQuat = new THREE.Quaternion();
+    }
+
+    // lati visti: si accende un segmento per ogni orientamento nuovo
+    if (quat && this.views.every((q) => q.angleTo(quat) > 0.6) && this.views.length < MAX_SHOTS) {
+      this.views.push(quat.clone());
+      this.segs[this.views.length - 1].material.opacity = 0.95;
+      this.ai.setSubtitle(`Scansione 3D: ${this.views.length} ${this.views.length === 1 ? 'lato' : 'lati'}… continua a girarlo`);
+    }
+
+    // una lettura di profondità ogni ~0,12 s (asincrona: non blocca il visore)
+    this.nextSample -= dt;
+    if (toLocal && this.nextSample <= 0 && !this.depth.busy) {
+      this.nextSample = 0.12;
+      const hands = this.handPoints();
+      const keep = (p) => hands.every((h) => h.distanceToSquared(p) > 0.022 * 0.022);
+      const rig = this.xrInput.rig?.matrixWorld;
+      this.depth.sample(rig).then((res) => {
+        if (!res || this.state !== 'capturing' || this.mode !== 'depth') return;
+        this.fusion.add(res.points, res.count, toLocal, keep);
+      }).catch(() => {});
+    }
+
+    const n = this.views.length;
+    const enough = (n >= 5 && this.fusion.frames > 30) || this.elapsed > 15 || (this.hand && this.lost > 1.5 && this.fusion.frames > 8);
+    if (this.hand && this.lost > 1.5 && this.fusion.frames <= 8) return this.cancel('L\'ho perso di vista. Tienilo davanti agli occhi e riproviamo.');
+    if (enough) this.buildDepth();
+  }
+
+  buildDepth() {
+    this.state = 'building';
+    const params = this.fusion.toParams();
+    if (params.cells < 25) return this.cancel('Non sono riuscita a vederlo bene: avvicinalo un po\' agli occhi e riproviamo.');
+    // colore medio dalla telecamera, se è disponibile (facoltativo)
+    let color = 0xc9c2b8;
+    if (this.cam.ready) {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 16; c.height = 12;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(this.cam.video, this.cam.video.videoWidth * 0.35, this.cam.video.videoHeight * 0.35, this.cam.video.videoWidth * 0.3, this.cam.video.videoHeight * 0.3, 0, 0, 16, 12);
+        const d = g.getImageData(0, 0, 16, 12).data;
+        let r = 0, gg = 0, b = 0;
+        for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; }
+        const k = d.length / 4;
+        if (r + gg + b > k * 30) color = (Math.round(r / k) << 16) | (Math.round(gg / k) << 8) | Math.round(b / k);
+      } catch { /* niente colore */ }
+    }
+    const part = createPart('voxel', { ...params, mat: { roughness: 0.6, metalness: 0 } }, color, 'Forma scansionata');
+    if (this.startQuat) part.quaternion.copy(this.startQuat); // com'era in mano all'inizio
+    const node = createAssembly('Oggetto scansionato', [part]);
+    node.userData.scanned = true;
+    const box = new THREE.Box3().setFromObject(node);
+    const size = box.getSize(new THREE.Vector3());
+    this.workspace.placeOnDesk(node);
+    this.appear?.(node);
+    this.workspace.select(node);
+    this.workspace.markDirty?.();
+    this.state = 'idle';
+    this.ring.visible = false;
+    this.cooldown = 6;
+    this.explodeAfter = false;
+    const cm = (v) => Math.round(v * 100);
+    this.ai.say(`Fatto: circa ${cm(size.x)} per ${cm(size.y)} per ${cm(size.z)} centimetri, sulla scrivania.`);
+  }
+
   updateCapture(dt) {
     this.elapsed += dt;
+    if (this.mode === 'depth') return this.updateDepth(dt);
     let center = null, quat = null;
     if (this.hand) {
       center = this.holdingReal(this.hand);
@@ -182,6 +324,8 @@ export class Scanner {
 
   /** Cosa manca perché la scansione funzioni? (detto a voce all'ingresso in realtà mista) */
   async readiness() {
+    if (this.depth.supported()) return { ok: true, depth: true };
+    if (this.isMixedReality() && !this.brain.enabled) return { ok: false, msg: 'Il browser del visore non mi dà il sensore di profondità: aggiorna il browser del Quest e rientra in realtà mista.' };
     if (!this.brain.enabled) return { ok: false, msg: 'Per scansionare mi serve la chiave di Claude: inseriscila nella pagina iniziale, al punto 2.' };
     try {
       if (!this.cam.ready) await this.cam.start();
@@ -213,7 +357,7 @@ export class Scanner {
     const r = await this.readiness();
     const v = this.cam.video;
     const parts = [
-      this.brain.enabled ? 'chiave di Claude presente' : 'manca la chiave di Claude',
+      this.depth.supported() ? 'sensore di profondità attivo' : 'sensore di profondità non disponibile',
       this.cam.ready ? `telecamera attiva ${v.videoWidth}×${v.videoHeight}` : 'telecamera spenta',
       this.isMixedReality() ? 'realtà mista attiva' : 'non sei in realtà mista',
       hands ? `${hands === 2 ? 'due mani tracciate' : 'una mano tracciata'}` : 'mani non tracciate, posa i controller',

@@ -9,11 +9,10 @@ e ti ascolta, oggetti da creare e smontare, e la **scansione automatica** degli 
 ## Primi passi
 
 1. **🎤 Attiva voce e microfono** (la prima volta scarica circa 200 MB, poi resta nel visore).
-2. **Chiave di Claude** (facoltativa): serve per creare qualsiasi oggetto e per la scansione. Resta solo nel visore.
-3. **📷 Abilita fotocamera** per la scansione.
+2. **Chiave di Claude** (facoltativa): solo per creare a voce oggetti che non sono nel catalogo.
 
 In VR tieni premuto **A** (o X) e parla. In **realtà mista** prendi un oggetto vero, tienilo davanti agli occhi e
-giralo piano: la copia 3D compare sulla scrivania.
+giralo piano: il sensore di profondità del Quest 3 lo scansiona in 3D (senza chiavi) e la copia compare sulla scrivania.
 
 Il codice completo (anche l'app nativa per il Quest) è nel repository privato `metaquest`.
 

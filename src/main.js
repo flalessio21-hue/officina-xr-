@@ -176,7 +176,19 @@ function applyMixedLook(on) {
 
 async function startSession(mode) {
   if (!navigator.xr) throw new Error('WebXR non disponibile');
-  const session = await navigator.xr.requestSession(mode, { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] });
+  const init = { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] };
+  if (mode === 'immersive-ar') {
+    // sensore di profondità del Quest 3: serve alla scansione 3D degli oggetti veri
+    init.optionalFeatures.push('depth-sensing');
+    init.depthSensing = { usagePreference: ['gpu-optimized', 'cpu-optimized'], dataFormatPreference: ['float32', 'luminance-alpha', 'unsigned-short'] };
+  }
+  const session = await navigator.xr.requestSession(mode, init);
+  // il sensore di profondità lo leggiamo noi (scansione): three.js non deve usarlo per conto suo
+  try {
+    const feats = [...(session.enabledFeatures || [])];
+    session.officinaFeatures = feats;
+    if (feats.includes('depth-sensing')) Object.defineProperty(session, 'enabledFeatures', { value: feats.filter((f) => f !== 'depth-sensing'), configurable: true });
+  } catch { /* niente */ }
   session.addEventListener('end', () => setTimeout(updateXRButtons, 0));
   await renderer.xr.setSession(session);
 }
@@ -625,7 +637,7 @@ renderer.xr.addEventListener('sessionstart', () => {
     if (!mixedReality) { ai.say('Ciao, sono qui sulla scrivania. Tieni premuto A e chiedimi quello che vuoi.'); return; }
     // in realtà mista controllo subito se la scansione può funzionare e dico cosa manca
     const r = await scanner.readiness();
-    ai.say(r.ok ? 'Vedo la tua stanza. Prendi un oggetto in mano e dimmi «scansiona».' : r.msg, { full: true });
+    ai.say(r.ok ? 'Vedo la tua stanza. Prendi un oggetto in mano, tienilo davanti agli occhi e giralo: lo scansiono in 3D.' : r.msg, { full: true });
   }, 900);
 });
 renderer.xr.addEventListener('sessionend', () => {
