@@ -213,6 +213,8 @@ const brain = new Brain({
 function command(text) {
   // scansione e diagnostica partono subito, senza passare da Claude
   const quick = /scansion|scanneriz|diagnostic|cosa non (va|funziona)/i.test(text);
+  // i comandi del menu (gravità, schede, pulsanti) partono subito, senza aspettare Claude
+  if (brain.enabled && !quick && actions.menu(text) !== undefined) return;
   if (brain.enabled && !quick) brain.handle(text);
   else actions.voice(text);
 }
@@ -436,6 +438,7 @@ ctx.power = (id) => {
 };
 
 // comandi vocali con Whisper nel visore
+ctx.isMixedReality = () => mixedReality;
 const neural = new NeuralVoice();
 ai.neural = neural;
 neural.onState = (st, p) => {
@@ -457,6 +460,7 @@ const voiceIn = new VoiceInput({
   },
   isBusy: () => ai.speaking,
 });
+ctx.voiceIn = voiceIn;
 async function initVoice() {
   const el = document.getElementById('voice-status');
   try {

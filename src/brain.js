@@ -8,6 +8,7 @@
  */
 import { LIBRARY } from './library.js';
 import { ALL_ITEMS } from './catalog.js';
+import { PANEL_TABS } from './actions.js';
 import { THEMES } from './themes.js';
 import { FEATURES } from './features.js';
 
@@ -102,6 +103,12 @@ const CATALOG_TOOL = tool('spawn_catalog', 'Mette un oggetto del catalogo già p
   size: { type: 'string', enum: ['auto', 'mini', 'real', 'giant'], description: 'auto = vero se sta sulla scrivania, altrimenti davanti all\'utente in miniatura; real = grandezza vera davanti all\'utente' },
 });
 
+const MENU = [];
+for (const tab of PANEL_TABS) for (const b of tab.buttons) if (b && !b.id.startsWith('obj:') && !MENU.some((m) => m.id === b.id)) MENU.push({ id: b.id, label: `${tab.label} › ${b.label}` });
+const MENU_TOOL = tool('press_button', 'Preme un pulsante del pannello (qualsiasi funzione del menu).', {
+  button: { type: 'string', enum: MENU.map((m) => m.id), description: MENU.map((m) => `${m.id} = ${m.label}`).join('; ') },
+});
+
 const TOOLS = [
   tool('create_shapes', 'Crea forme semplici sulla scrivania (e le seleziona).', {
     shape: { type: 'string', enum: SHAPES },
@@ -112,6 +119,7 @@ const TOOLS = [
     object: { type: 'string', enum: LIBRARY.map((it) => it.id), description: LIBRARY.map((it) => `${it.id} = ${it.label}`).join(', ') },
   }),
   CATALOG_TOOL,
+  MENU_TOOL,
   BUILD_TOOL,
   tool('scan_object', 'Avvia la scansione dell\'oggetto vero che l\'utente tiene in mano (serve la realtà mista).', {}),
   tool('select', 'Seleziona gli oggetti sulla scrivania il cui nome contiene il testo dato ("*" = tutti, "" = nessuno). Le altre azioni agiscono sulla selezione.', {
@@ -249,6 +257,8 @@ export class Brain {
         }
         return out.filter(Boolean).join(' ') || 'Fatto.';
       }
+      case 'press_button':
+        return actions.run(input.button, { speak: false }) || 'Fatto.';
       case 'describe_scene':
         return JSON.stringify(this.sceneState());
       default:

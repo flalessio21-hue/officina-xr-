@@ -12,11 +12,11 @@ const UP = new THREE.Vector3(0, 1, 0);
  *
  * Mani (hand tracking):
  *   - pizzica vicino a un pezzo        → lo afferri direttamente
- *   - punta e pizzica da lontano       → afferri col raggio / premi pulsanti / ti teletrasporti sul pavimento
+ *   - punta e pizzica da lontano       → afferri col raggio / premi pulsanti
  *   - tocca il pannello con l'indice   → premi il pulsante
  *   - due mani sullo stesso pezzo      → lo scali allargando/stringendo le mani
  * Controller:
- *   - grilletto                         → raggio: afferra / pulsanti / teletrasporto
+ *   - grilletto                         → raggio: afferra / pulsanti
  *   - grip vicino a un pezzo            → presa diretta; grip col raggio su un pezzo → aggiungi alla selezione
  *   - stick sinistro                    → cammina;  stick destro → rotazione a scatti
  *   - stick mentre tieni un pezzo       → su/giù scala, sinistra/destra ruota
@@ -246,9 +246,8 @@ export class XRInput {
     } else if (hit.kind === 'part') {
       const node = this.workspace.resolvePick(hit.object);
       if (node) this.grab(c, node, c, 'select', hit.object);
-    } else if (hit.kind === 'floor') {
-      this.teleport(hit.point);
     }
+    // niente teletrasporto: puntando il pavimento per prendere un oggetto si finiva lontano
   }
 
   onSqueezeStart(c) {
@@ -432,7 +431,7 @@ export class XRInput {
         dot.position.copy(hit.point);
         if (hit.kind === 'panel' && !pokeId) panelId = this.panel.hitTest(hit.uv);
         else if (hit.kind === 'part' && !c.userData.grabbed) hoverNode = this.workspace.resolvePick(hit.object);
-        else if (hit.kind === 'floor' && !c.userData.grabbed) markerAt = hit.point;
+
       } else {
         line.scale.z = 1.5;
         dot.visible = false;

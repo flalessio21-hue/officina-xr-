@@ -3,7 +3,7 @@ import { THEMES, ThemeManager } from './themes.js';
 import { LIBRARY } from './library.js';
 import { FEATURES } from './features.js';
 import { CATALOG } from './catalog.js';
-import { norm, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE, fixTranscript } from './intent.js';
+import { norm, hasKeyword, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE, fixTranscript } from './intent.js';
 
 const b = (id, label) => ({ id, label });
 
@@ -406,6 +406,68 @@ export function createActions(ctx) {
   }
 
   /** Interpreta un comando in linguaggio naturale (italiano), tollerante agli errori della voce. */
+  // ---- tutto il menu a voce ----
+  const say = (m) => { if (m) notify(m, true); return m; };
+  const ON = /\b(attiva|accendi|abilita|avvia|metti|inserisci|si)\b/;
+  const OFF = /\b(disattiva|spegni|disabilita|togli|leva|ferma|blocca|no|niente|senza)\b/;
+  // pulsanti con uno stato acceso/spento: come leggere lo stato e come cambiarlo
+  const TOGGLES = {
+    gravity: { name: ['La gravità', 'attiva', 'spenta'], words: ['gravita'], get: () => !!ctx.physics?.enabled, set: () => run('gravity', { speak: true }) },
+    listenAlways: { name: ['L\'ascolto continuo', 'attivo', 'spento'], words: ['ascolto', 'ascoltami sempre', 'ascolto continuo'], get: () => !!ctx.voiceIn?.continuous, set: (on) => say(ctx.voiceContinuous?.(on) || '') },
+    deskToggle: { name: ['La scrivania', 'visibile', 'nascosta'], words: ['scrivania'], get: () => env.deskTop.visible, set: () => say(ctx.toggleDesk?.() || '') },
+    multi: { name: ['La selezione multipla', 'attiva', 'spenta'], words: ['selezione multipla', 'multi'], get: () => multi, set: () => run('multi', { speak: true }) },
+    mr: { name: ['La realtà mista', 'attiva', 'spenta'], words: ['realta mista', 'passthrough', 'passtrough', 'vedere la stanza', 'la mia stanza'], get: () => !!ctx.isMixedReality?.(), set: () => run('mr', { speak: true }) },
+    lamp: { name: ['La lampada', 'accesa', 'spenta'], words: ['lampada', 'luce'], get: () => env.lampOn?.() ?? null, set: () => run('lamp', { speak: true }) },
+  };
+  const cleanLabel = (l) => norm(String(l).split(':')[0].replace(/[●▲▼◀▶+−\-×()]/g, ' '));
+  function allButtons() {
+    const out = [];
+    for (const tab of PANEL_TABS) {
+      out.push({ id: 'tab:' + tab.id, label: 'scheda ' + tab.label, tab: true });
+      for (const btn of tab.buttons) if (btn) out.push({ id: btn.id, label: btn.label });
+    }
+    for (const c of CATALOG) out.push({ id: 'cat:' + c.id, label: 'categoria ' + c.label });
+    return out;
+  }
+
+  /** Riconosce un comando del menu (pulsanti, schede, interruttori). Ritorna il messaggio o undefined. */
+  function menuVoice(t, { early = false } = {}) {
+    // interruttori: «attiva la gravità», «spegni l'ascolto», «togli la scrivania»
+    const wantOn = ON.test(t), wantOff = OFF.test(t);
+    for (const [id, tg] of Object.entries(TOGGLES)) {
+      if (early && !wantOn && !wantOff && !/(mostra|nascondi)/.test(t)) break;
+      if (!tg.words.some((w) => hasKeyword(t, w))) continue;
+      if (id === 'deskToggle' && !/(mostra|nascondi|togli|leva|rimetti|fai (sparire|vedere))/.test(t)) continue; // «alza la scrivania» è un'altra cosa
+      if (id === 'lamp' && !/(accendi|spegni|lampada)/.test(t)) continue;
+      const on = wantOff ? false : wantOn ? true : null;
+      const cur = tg.get();
+      if (on == null || cur == null) return tg.set(on ?? !cur);
+      if (cur === on) return say(`${tg.name[0]} è già ${on ? tg.name[1] : tg.name[2]}.`);
+      return tg.set(on);
+    }
+    // schede: «apri la scheda mondo», «vai su sistema»
+    const tabM = t.match(/\b(apri|vai|mostra|passa|scheda|menu)\b.*\b(crea|da smontare|smonta|modifica|mondo|sistema)\b/);
+    if (tabM && /\b(scheda|menu|vai|apri|passa)\b/.test(t)) {
+      const tab = PANEL_TABS.find((x) => norm(x.label) === tabM[2]);
+      if (tab) { run('tab:' + tab.id); return say(`Scheda ${tab.label}.`); }
+    }
+    // qualsiasi pulsante per nome («rimonta estratti», «misura originale», «cambia voce»)
+    let best = null, bestLen = 0;
+    for (const b of allButtons()) {
+      if (b.tab) continue;
+      // in anticipo (prima di creare oggetti) solo nomi di pulsanti di almeno due parole, scritti uguali
+      if (early && /^(lib|obj|cat):/.test(b.id)) continue;
+      const words = cleanLabel(b.label).split(' ').filter((w) => w.length > 2 || /^(su|giu|piu)$/.test(w));
+      if (!words.length || (early && words.length < 2)) continue;
+      if (words.every((w) => hasKeyword(t, w, early)) && words.join(' ').length > bestLen) { best = b; bestLen = words.join(' ').length; }
+    }
+    if (best) {
+      if (best.id.startsWith('cat:')) { run('tab:oggetti'); run(best.id); return say(`Categoria ${cleanLabel(best.label).replace('categoria ', '')}.`); }
+      return run(best.id, { speak: true }) ?? null;
+    }
+    return undefined;
+  }
+
   function voice(raw) {
     const t = norm(fixTranscript(raw));
     const has = (re) => re.test(t);
@@ -414,6 +476,8 @@ export function createActions(ctx) {
     const local = has(/(sopra di me|su di me|addosso|sulla (mia )?testa|qui sopra|solo su di me)/);
 
     if (has(/\b(ciao|salve|buongiorno|buonasera|hey|ehi)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa creiamo oggi?');
+    const early = t.split(' ').length <= 7 ? menuVoice(t, { early: true }) : undefined;
+    if (early !== undefined) return early;
     if (has(/chi sei|come ti chiami/)) return say('Sono la tua assistente. In questo mondo posso creare qualsiasi cosa del catalogo, cambiare il tempo e l’ambiente, e smontare tutto.');
     if (has(/aiuto|cosa (sai|puoi) fare|come funziona|cosa posso (fare|dire)/)) return say(HELP);
     if (has(/voce|parla/) && has(/acut|sottil|stridul/)) return run('pitch+', { speak: true });
@@ -509,6 +573,8 @@ export function createActions(ctx) {
       workspace.colorSelected(c);
       return say(c != null ? 'Fatto, nuovo colore.' : 'Ho cambiato colore.');
     }
+    const viaMenu = menuVoice(t);
+    if (viaMenu !== undefined) return viaMenu;
     const shape = SHAPES.find(([, re]) => re.test(t));
     if (shape) return run(shape[0], { speak: true });
     const m = t.match(/\b(crea|creami|fammi|fai|metti|mettimi|aggiungi|genera|costruisci|evoca|voglio|dammi|disegna|materializza|appari)\b\s+(?:un |uno |una |un'|il |lo |la |dei |delle |degli |i |gli |le )?(\w+)/);
@@ -519,6 +585,12 @@ export function createActions(ctx) {
   return {
     run,
     voice,
+    /** Comando del menu riconosciuto con sicurezza (usato prima di chiedere a Claude). */
+    menu: (raw) => {
+      const t = norm(fixTranscript(raw));
+      if (t.split(' ').length > 7) return undefined;
+      return menuVoice(t, { early: true });
+    },
     get multi() { return multi; },
     get twoHand() { return settings.twoHand; },
     tickHistory,

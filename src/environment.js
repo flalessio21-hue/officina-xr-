@@ -86,6 +86,7 @@ function buildLamp(mats, blockers) {
     bulbMat.color.setRGB(on ? 3.2 : 0.25, on ? 2.9 : 0.24, on ? 2.4 : 0.22);
     return on;
   };
+  lamp.userData.isOn = () => on;
   return lamp;
 }
 
@@ -212,5 +213,6 @@ export function createEnvironment(scene, renderer) {
   return {
     deskRig, workspaceRoot, floor, hemi, blockers, setDeskHeight, bin: binInfo, deskTop: top, mat,
     toggleLamp: () => lamp.userData.toggle(),
+    lampOn: () => lamp.userData.isOn(),
   };
 }
