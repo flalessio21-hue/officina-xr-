@@ -133,7 +133,7 @@ export class Panel {
       g.fillStyle = on ? r.tab.color : hovered.has(r.id) ? '#2a3442' : '#161b22';
       g.fill();
       g.fillStyle = on ? '#06121f' : '#c9d3df';
-      g.font = `${on ? 700 : 600} 23px ${FONT}`;
+      g.font = `${on ? 700 : 600} ${this.tabs.length > 7 ? 19 : 23}px ${FONT}`;
       g.fillText(r.tab.label, r.x + r.w / 2, r.y + r.h / 2 + 1);
     }
 

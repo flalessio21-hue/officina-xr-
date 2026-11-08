@@ -52,6 +52,7 @@
     #enter-mr { border-color: #7fe3ff; color: #7fe3ff; }
     #intro .row { display: flex; gap: 6px; margin: 8px 0 4px; }
     #intro .row input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid #2b3440; background: #151a21; color: #e6edf5; }
+    #intro .row select { padding: 8px; border-radius: 8px; border: 1px solid #2b3440; background: #151a21; color: #e6edf5; }
     #intro .row button { padding: 8px 12px; border-radius: 8px; border: 1px solid #2b3440; background: #1c222b; color: #e6edf5; cursor: pointer; }
     #intro .small { font-size: 12px; margin: 2px 0 6px; }
     #intro a { color: #8fc6ff; }
@@ -77,6 +78,9 @@
     <p>Il tuo mondo privato: una scrivania, un'AI che brilla in lontananza, una libreria di oggetti già montati da smontare fino all'ultima vite, ambienti e gravità.</p>
     <p><b>Mani:</b> pizzica per prendere · <b>doppio pizzico</b> apre/chiude un oggetto · <b>pizzico tenuto fermo</b> stacca un componente · due mani per scalare o aprire · tocca i pulsanti col dito · punta il pavimento e pizzica per muoverti.</p>
     <p><b>Controller:</b> grilletto = raggio (afferra, pulsanti, teletrasporto) · grip = presa diretta · stick sinistro = cammina · stick destro = gira.</p>
+    <p class="row"><button id="voice-btn" type="button">🎤 Attiva comandi vocali</button>
+      <select id="voice-quality"><option value="veloce">veloce (80–140 MB)</option><option value="preciso">più preciso, più lento (250 MB)</option></select></p>
+    <p class="small"><span id="voice-status">Il modello si scarica una volta sola, poi funziona senza internet. In VR: tieni premuto A e parla.</span></p>
     <div id="ai-settings" hidden>
     <form id="ai-form" class="row">
       <input id="ai-key" type="password" placeholder="Chiave AI Claude (sk-ant-…)" autocomplete="off">

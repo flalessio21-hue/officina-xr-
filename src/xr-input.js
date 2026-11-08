@@ -29,6 +29,10 @@ export class XRInput {
     this.controllers = [];
     this.twoHand = null;
     // tempi dei gesti (ms): tocco breve, doppio pizzico, pizzico lungo per estrarre
+    this.flying = false;
+    this.playerScale = 1;
+    this.onTalk = null; // tasto A/X tenuto premuto = parla
+    this.talkDown = false;
     this.tapMs = 450;
     this.doubleMs = 700;
     this.longMs = 900;
@@ -358,7 +362,7 @@ export class XRInput {
     if (fwd.lengthSq() < 1e-6) return;
     fwd.normalize();
     const right = new THREE.Vector3().crossVectors(fwd, UP);
-    const speed = 1.6;
+    const speed = 1.6 * (this.playerScale || 1);
     this.rig.position.addScaledVector(fwd, -ay * speed * dt).addScaledVector(right, ax * speed * dt);
   }
 
@@ -425,6 +429,13 @@ export class XRInput {
       if (nearNode) hoverNode = nearNode;
       this.panel.setHover(key, panelId);
 
+      // tasto A (destro) o X (sinistro) tenuto premuto: parla con l'AI
+      const btn = source.gamepad?.buttons?.[4];
+      if (!isHand && btn) {
+        if (btn.pressed && !c.userData.talk) { c.userData.talk = true; this.onTalk?.(true); }
+        else if (!btn.pressed && c.userData.talk) { c.userData.talk = false; this.onTalk?.(false); }
+      }
+
       // levette dei controller
       const axes = source.gamepad?.axes;
       if (!isHand && axes && axes.length >= 4) {
@@ -440,6 +451,8 @@ export class XRInput {
         } else if (source.handedness === 'left') {
           if (Math.hypot(ax, ay) > 0.15) this.move(ax, ay, dt);
         } else {
+          // in volo: stick destro su/giù per salire e scendere
+          if (this.flying && Math.abs(ay) > 0.2) this.rig.position.y = Math.max(0, this.rig.position.y - ay * dt * 2 * (this.playerScale || 1));
           const ready = this.snapReady[source.handedness] ?? true;
           if (Math.abs(ax) > 0.7 && ready) {
             this.turn(-Math.sign(ax) * Math.PI / 6);

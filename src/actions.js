@@ -2,8 +2,14 @@ import { THEMES, ThemeManager } from './themes.js';
 
 import { LIBRARY } from './library.js';
 import { FEATURES } from './features.js';
+import { CATALOG } from './catalog.js';
+import { norm, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE } from './intent.js';
 
 const b = (id, label) => ({ id, label });
+
+// stato del menu Oggetti: categoria scelta e misura con cui creare
+export const objectMenu = { cat: 'tech', size: 'auto' };
+const SIZE_LABEL = { auto: 'Misura: AUTO', mini: 'Misura: MINI', real: 'Misura: REALE', giant: 'Misura: GIGANTE' };
 
 /** Il pannello a sinistra della scrivania, diviso in schede. */
 export const PANEL_TABS = [
@@ -19,6 +25,28 @@ export const PANEL_TABS = [
   {
     id: 'libreria', label: 'Libreria', color: '#ffc845', hint: 'Oggetti già montati: smontali pezzo per pezzo (scheda Smonta).',
     buttons: LIBRARY.map((it) => b('lib:' + it.id, it.label)),
+  },
+  {
+    id: 'oggetti', label: 'Oggetti', color: '#ff7fd0', hint: 'Scegli una categoria, poi tocca un oggetto. AUTO: piccolo sulla scrivania, REALE: vero, davanti a te.',
+    get buttons() {
+      const cat = CATALOG.find((c) => c.id === objectMenu.cat) || CATALOG[0];
+      const items = cat.items.map((it) => b('obj:' + it.id, it.label));
+      while (items.length < 8) items.push(null);
+      return [
+        ...CATALOG.map((c) => b('cat:' + c.id, (c.id === objectMenu.cat ? '● ' : '') + c.label)),
+        ...items.slice(0, 8),
+        b('size', SIZE_LABEL[objectMenu.size]), b('undo', 'Annulla'), b('delete', 'Elimina'), b('clear', 'Svuota'),
+      ];
+    },
+  },
+  {
+    id: 'poteri', label: 'Poteri', color: '#ffd84a', hint: 'Sei il dio di questo mondo. Puoi anche dirlo a voce: «fai piovere sopra di me».',
+    buttons: [
+      b('w:rain', 'Pioggia'), b('w:rain-local', 'Pioggia su di me'), b('w:storm', 'Temporale'), b('w:bolt', 'Fulmine'),
+      b('w:snow', 'Neve'), b('w:fog', 'Nebbia'), b('w:rainbow', 'Arcobaleno'), b('w:clear', 'Sereno'),
+      b('p:giant', 'Diventa gigante'), b('p:tiny', 'Diventa minuscolo'), b('p:normal', 'Misura normale'), b('p:fly', 'Volo: NO'),
+      b('rainPizza', 'Pioggia di pizze'), b('gravity', 'Gravità: NO'), b('talk', 'Parla (A)'), b('listenAlways', 'Ascolto: NO'),
+    ],
   },
   {
     id: 'modifica', label: 'Modifica', color: '#45d483', hint: 'Agisce sugli oggetti selezionati (evidenziati in blu).',
@@ -70,7 +98,9 @@ const GESTURES = 'Per smontare: fai un doppio pizzico su un oggetto per aprirlo,
   + 'Con Due mani su Esplodi, prendi un oggetto con due mani e allargale: si apre quanto vuoi. '
   + 'Per buttare qualcosa, lascialo cadere nel cestino accanto alla scrivania.';
 
-const HELP = 'Crea un pezzo dal pannello. Con le mani pizzicalo per prenderlo, tocca i pulsanti col dito, e usa due mani per ingrandirlo. '
+const HELP = 'Puoi dirmi di creare quasi qualsiasi cosa: un maiale, una macchina vera, tre pizze, uno scheletro gigante, una casa. '
+  + 'Puoi cambiare il tempo: fai piovere sopra di me, temporale, neve, arcobaleno. Puoi diventare gigante o minuscolo, e volare. '
+  + 'Crea un pezzo dal pannello. Con le mani pizzicalo per prenderlo, tocca i pulsanti col dito, e usa due mani per ingrandirlo. '
   + 'Coi controller usa grilletto e grip; lo stick sinistro ti fa camminare, il destro ti gira. Punta il pavimento e premi per teletrasportarti. '
   + 'Raggruppa unisce più pezzi in un assieme. Puoi cambiare ambiente: spazio, sott\'acqua, tramonto, aurora. '
   + 'Esplodi apre un livello alla volta, Esplodi tutto smonta fino all’ultima vite, Ricomponi rimonta.';
@@ -280,6 +310,16 @@ export function createActions(ctx) {
         : 'Con due mani ora apri gli oggetti: prendili con entrambe le mani e allargale.';
     },
     gestures: () => GESTURES,
+    size: () => {
+      const order = ['auto', 'mini', 'real', 'giant'];
+      objectMenu.size = order[(order.indexOf(objectMenu.size) + 1) % order.length];
+      panel.dirty = true;
+      return { auto: 'Misura automatica: le cose piccole vere, le grandi in miniatura.', mini: 'Tutto in miniatura sulla scrivania.', real: 'Tutto a grandezza reale, davanti a te.', giant: 'Tutto gigante!' }[objectMenu.size];
+    },
+    rainPizza: () => ctx.rainObjects?.(CATALOG.find((c) => c.id === 'food').items[0], 10),
+    talk: () => (ctx.voiceTalk ? ctx.voiceTalk() : (ai.listen(), null)),
+    listenAlways: () => ctx.voiceContinuous?.(true) || null,
+    listenStop: () => ctx.voiceContinuous?.(false) || null,
     scan: () => (ctx.scan ? (ctx.scan(), null) : 'La scansione non è disponibile.'),
     mr: () => ctx.mixedReality?.() || null,
     deskToggle: () => ctx.toggleDesk?.() || null,
@@ -321,8 +361,24 @@ export function createActions(ctx) {
       panel.setTab(id.slice(4));
       return null;
     }
+    if (id.startsWith('cat:')) {
+      objectMenu.cat = id.slice(4);
+      panel.dirty = true;
+      return null;
+    }
     panel.press(id);
     let msg;
+    if (id.startsWith('obj:')) {
+      const item = CATALOG.flatMap((c) => c.items).find((it) => 'obj:' + it.id === id);
+      msg = item ? ctx.spawn?.(item, { size: objectMenu.size }) : null;
+      if (msg) notify(msg, speak ?? false);
+      return msg;
+    }
+    if (id.startsWith('w:') || id.startsWith('p:')) {
+      msg = ctx.power?.(id);
+      if (msg) notify(msg, speak ?? true);
+      return msg;
+    }
     if (id.startsWith('lib:')) {
       const item = LIBRARY.find((it) => 'lib:' + it.id === id);
       if (!item) return null;
@@ -352,23 +408,56 @@ export function createActions(ctx) {
     return msg;
   }
 
-  /** Interpreta un comando in linguaggio naturale (italiano). */
-  function voice(raw) {
-    const t = raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const has = (re) => re.test(t);
-    const say = (m) => { notify(m, true); return m; };
+  /** Seleziona gli oggetti sulla scena il cui nome contiene quello dell'oggetto nominato. */
+  function selectByName(label) {
+    const key = label.toLowerCase().split(' ')[0];
+    const hits = workspace.topLevel().filter((n) => n.name.toLowerCase().includes(key));
+    workspace.selected = new Set(hits);
+    workspace.highlightDirty = true;
+    return hits.length;
+  }
 
-    if (has(/\b(ciao|salve|buongiorno|buonasera|hey)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa costruiamo oggi?');
-    if (has(/chi sei|come ti chiami/)) return say('Sono la tua assistente di officina. Ti aiuto a creare, assemblare e smontare oggetti.');
-    if (has(/aiuto|cosa (sai|puoi) fare|come funziona/)) return say(HELP);
+  /** Interpreta un comando in linguaggio naturale (italiano), tollerante agli errori della voce. */
+  function voice(raw) {
+    const t = norm(raw);
+    const has = (re) => re.test(t);
+    const say = (m) => { if (m) notify(m, true); return m; };
+    const item = findItem(t);
+    const local = has(/(sopra di me|su di me|addosso|sulla (mia )?testa|qui sopra|solo su di me)/);
+
+    if (has(/\b(ciao|salve|buongiorno|buonasera|hey|ehi)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa creiamo oggi?');
+    if (has(/chi sei|come ti chiami/)) return say('Sono la tua assistente. In questo mondo posso creare qualsiasi cosa del catalogo, cambiare il tempo e l’ambiente, e smontare tutto.');
+    if (has(/aiuto|cosa (sai|puoi) fare|come funziona|cosa posso (fare|dire)/)) return say(HELP);
     if (has(/voce|parla/) && has(/acut|sottil|stridul/)) return run('pitch+', { speak: true });
     if (has(/voce|parla/) && has(/grav|bass|profond/)) return run('pitch-', { speak: true });
+    if (has(/ascolt\w* (sempre|di continuo|continu)|ascolto continuo|resta in ascolto/)) return run('listenAlways', { speak: true });
+    if (has(/smetti di ascoltare|non ascoltare|basta ascoltare|stop ascolto/)) return run('listenStop', { speak: true });
     if (has(/invit|chi c'?e|chi e qui/)) return run('invite', { speak: true });
+
+    // ---------- poteri: meteo
+    if (item && has(/\b(piov|pioggia|acquazzon|diluvi|grandin|cad\w+ dal cielo)/) && !has(/smetti|basta|ferma/)) {
+      return say(ctx.rainObjects?.(item, Math.max(countIn(t), 8)));
+    }
+    if (has(/smetti di (piovere|nevicare)|basta (pioggia|neve|nebbia|temporale)|ferma (la )?(pioggia|neve)|\bsereno\b|cielo (sereno|limpido)|(esce|torna) il sole|niente (pioggia|neve)|togli (la )?(pioggia|neve|nebbia|nuvola)|bel tempo/)) return run('w:clear', { speak: true });
+    if (has(/temporal|tempesta|uragan|tuon|bufera/) && !has(/neve/)) return run(local ? 'w:storm-local' : 'w:storm', { speak: true });
+    if (has(/\b(fulmin|saett|lampo)/)) return run('w:bolt', { speak: true });
+    if (has(/\b(piov|pioggia|acquazzon|diluvi|grandin|scrosci)/)) return run(local ? 'w:rain-local' : 'w:rain', { speak: true });
+    if (has(/nevic|fiocchi|tempesta di neve|bufera di neve/) || (has(/\bneve\b/) && !has(/portami|andiamo|polo|aurora|ambiente/))) return run(local ? 'w:snow-local' : 'w:snow', { speak: true });
+    if (has(/nebbia|foschia/)) return run('w:fog', { speak: true });
+    if (has(/arcobalen/)) return run('w:rainbow', { speak: true });
+
+    // ---------- poteri: il tuo corpo
+    if (has(/(diventa|diventare|fammi|rendimi|trasformami|voglio essere|fai di me|sono) (un |una |piu )?(gigante|enorme|altissim|grandissim)/)) return run('p:giant', { speak: true });
+    if (has(/(diventa|diventare|fammi|rendimi|trasformami|voglio essere|fai di me) (un |una |piu )?(piccol|minuscol|formica|nano|mini)/)) return run('p:tiny', { speak: true });
+    if (has(/(dimensioni?|grandezza|altezza|misura) normal|torna(re)? normale|di nuovo normale/)) return run('p:normal', { speak: true });
+    if (has(/atterr|smetti di volare|scendi a terra|torna a terra|basta volare/)) return run('p:fly-off', { speak: true });
+    if (has(/\b(vola|volare|volo|levit|fammi volare)/)) return run('p:fly-on', { speak: true });
+
+    // ---------- ambienti: "portami nello spazio", "andiamo sott'acqua"…
     {
-      // ambienti: "portami nello spazio", "andiamo sott'acqua"… (ma "crea un cubo nero" crea un cubo)
-      const isShape = SHAPES.some(([, re]) => re.test(t)) || has(/\b(crea|aggiungi|colora|cerca)\b/);
+      const isMake = SHAPES.some(([, re]) => re.test(t)) || item || has(/\b(crea|aggiungi|colora|cerca)\b/);
       const context = has(/ambient|stanza|scenari|sfondo|mondo|portami|mettimi|andiamo|voglio|vai|torna|cambia|tema|sono|siamo|immergi|fammi vedere|nello|nel |sott/);
-      const th = !isShape && (context || t.split(/\s+/).length <= 3) ? ThemeManager.fromText(t) : null;
+      const th = !isMake && (context || t.split(/\s+/).length <= 3) ? ThemeManager.fromText(t) : null;
       if (th) return run('theme:' + th, { speak: true });
     }
     if (has(/scansion|scanneriz|scanner|digitalizz|rendil[oa] virtual/)) {
@@ -376,47 +465,56 @@ export function createActions(ctx) {
     }
     if (has(/passthrough|pass through|realta mista|realta aumentata|stanza reale|mia stanza|vedere (la )?(mia )?(stanza|casa)/)) return run('mr', { speak: true });
     if (has(/gravit/)) {
-      const on = !has(/spegn|togli|disattiv|senza|via la/);
+      const on = !has(/spegn|togli|disattiv|senza|via la|niente/);
       if (!!ctx.physics?.enabled !== on) return run('gravity', { speak: true });
       return say(on ? 'La gravità è già attiva.' : 'La gravità è già spenta.');
     }
     if (has(/annulla|torna indietro/)) return run('undo', { speak: true });
-    if (has(/ripeti|rifai/)) return run('redo', { speak: true });
-    {
-      // oggetti della libreria: "carica il motore", "fammi vedere il razzo"…
-      const names = { fotocamer: 'camera', 'macchina fotografica': 'camera', automobil: 'car', macchin: 'car', '\bauto\b': 'car',
-        robot: 'robot', braccio: 'robot', ventilator: 'fan', razzo: 'rocket', motore: 'engine', riduttor: 'gearbox',
-        orologio: 'clock', tastiera: 'keyboard', satellit: 'satellite', casa: 'house', sedia: 'chair', lampadina: 'bulb', drone: 'drone' };
-      const key = Object.keys(names).find((k) => new RegExp(k).test(t));
-      if (key && !has(/\b(crea un cubo|sfera)\b/)) return run('lib:' + names[key], { speak: true });
+    if (has(/\b(ripeti|rifai)\b/)) return run('redo', { speak: true });
+
+    // ---------- oggetti: crea, oppure agisci su quelli che ci sono
+    const verb = /\b(esplodi|smonta|disassembla|apri|ricomponi|rimonta|chiudi|ruota|gira|colora|dipingi|vernicia|ingrandisci|rimpicciolisci|duplica|copia|clona|seleziona|capovolgi|estrai|sposta)\b/.test(t);
+    if (item && REMOVE.test(t)) {
+      if (!selectByName(item.label)) return say(`Qui non c'è nessun ${item.label.toLowerCase()}.`);
+      return run('delete', { speak: true });
     }
+    if (item && verb) {
+      if (!selectByName(item.label)) return say(`Qui non c'è nessun ${item.label.toLowerCase()}: dimmi di crearlo.`);
+    } else if (item) {
+      return say(ctx.spawn?.(item, { count: countIn(t), size: sizeIn(t), where: whereIn(t), color: colorIn(t) }));
+    }
+
     if (has(/(esplodi|smonta|disassembla).*(tutto|completamente|dettaglio)|massimo dettaglio|ogni (singol|pezz)/)) return run('explodeAll', { speak: true });
     if (has(/esplodi|smonta|disassembla|apri/)) return run('explode', { speak: true });
     if (has(/ricomponi|rimonta|riassembla|assembla|richiudi|chiudi/)) return run('collapse', { speak: true });
-    if (has(/pulisci|svuota|cancella tutto|elimina tutto/)) return run('clear', { speak: true });
-    if (has(/elimina|cancella|togli|butta/)) return run('delete', { speak: true });
+    if (has(/pulisci|svuota|cancella tutto|elimina tutto|togli tutto|via tutto/)) return run('clear', { speak: true });
+    if (REMOVE.test(t)) return run('delete', { speak: true });
     if (has(/raggruppa|unisci/)) return run('group', { speak: true });
     if (has(/separa|dividi|sciogli/)) return run('ungroup', { speak: true });
     if (has(/duplica|copia|clona/)) return run('duplicate', { speak: true });
-    if (has(/salva/)) return run('save', { speak: true });
-    if (has(/carica|riapri/)) return run('load', { speak: true });
+    if (has(/\bsalva/)) return run('save', { speak: true });
+    if (has(/\b(carica|riapri)\b/)) return run('load', { speak: true });
     if (has(/esporta/)) return run('export', { speak: true });
     if (has(/ingrandisci|piu grande|allarga tutto/)) return run('s+', { speak: true });
     if (has(/rimpicciolisci|piu piccol|riduci/)) return run('s-', { speak: true });
-    if (has(/ruota|gira/)) return run('rotate', { speak: true });
+    if (has(/\b(ruota|gira)\b/)) return run('rotate', { speak: true });
+    if (has(/capovolgi/)) return run('flip', { speak: true });
     if (has(/deseleziona/)) return run('deselect', { speak: true });
-    if (has(/torna|scrivania|vieni qui/)) return run('home', { speak: true });
-    if (has(/lampada|luce/)) return run('lamp', { speak: true });
+    if (has(/seleziona tutto/)) return run('selectAll', { speak: true });
+    if (has(/torna (alla scrivania|qui)|vieni qui|riportami/)) return run('home', { speak: true });
+    if (has(/lampada|accendi la luce|spegni la luce/)) return run('lamp', { speak: true });
     if (has(/quanto (e|misura)|dimensioni|misure/)) return say(workspace.info().replace(/×/g, 'per').replace(/mm/, 'millimetri'));
     if (has(/colore|colora|dipingi|vernicia/)) {
-      const key = Object.keys(COLORS).find((k) => t.includes(k));
-      if (!workspace.selected.size) return say('Seleziona prima cosa vuoi colorare.');
-      workspace.colorSelected(key ? COLORS[key] : null);
-      return say(key ? 'Fatto, nuovo colore.' : 'Ho cambiato colore.');
+      if (!workspace.selected.size) return say('Dimmi cosa colorare, per esempio: colora il maiale di blu.');
+      const c = colorIn(t);
+      workspace.colorSelected(c);
+      return say(c != null ? 'Fatto, nuovo colore.' : 'Ho cambiato colore.');
     }
     const shape = SHAPES.find(([, re]) => re.test(t));
     if (shape) return run(shape[0], { speak: true });
-    return say('Questo non lo so fare ancora. Dimmi cosa creare, cosa smontare o dove portarti, e lo faccio.');
+    const m = t.match(/\b(crea|creami|fammi|fai|metti|mettimi|aggiungi|genera|costruisci|evoca|voglio|dammi|disegna|materializza|appari)\b\s+(?:un |uno |una |un'|il |lo |la |dei |delle |degli |i |gli |le )?(\w+)/);
+    if (m) return say(`Non ho ancora ${m[2]} nel mio catalogo. Apri la scheda Oggetti: ci sono più di cinquanta cose, da animali e veicoli a cibo, mobili e persone.`);
+    return say('Non ho capito bene: ripetilo in un altro modo.');
   }
 
   return {

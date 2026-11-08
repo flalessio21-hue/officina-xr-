@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createEnvironment, DESK } from './environment.js';
 import { Hologram } from './hologram.js';
+import { Weather } from './weather.js';
+import { VoiceInput } from './voice-input.js';
 import { AIOrb } from './ai.js';
 import { Workspace } from './workspace.js';
 import { Panel } from './panel.js';
@@ -281,6 +283,196 @@ function myPose() {
   return pose;
 }
 
+// ---------------------------------------------------------------- creare qualsiasi cosa, poteri, voce
+const _head = new THREE.Vector3();
+function headPose() {
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  cam.updateMatrixWorld();
+  const pos = cam.getWorldPosition(new THREE.Vector3());
+  const fwd = cam.getWorldDirection(new THREE.Vector3());
+  fwd.y = 0;
+  if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+  fwd.normalize();
+  return { pos, fwd, right: new THREE.Vector3(-fwd.z, 0, fwd.x) };
+}
+
+const weather = new Weather(scene, () => (renderer.xr.isPresenting ? renderer.xr.getCamera() : camera).getWorldPosition(_head));
+
+/** Ingombri a terra già occupati (scrivania, cestino, oggetti grandi): rettangoli [minX, minZ, maxX, maxZ]. */
+function occupiedFootprints(exclude) {
+  const out = [];
+  const b = new THREE.Box3();
+  const push = (box, pad = 0.15) => out.push([box.min.x - pad, box.min.z - pad, box.max.x + pad, box.max.z + pad]);
+  push(b.setFromObject(env.deskTop), 0.35);
+  push(b.setFromObject(panel.mesh), 0.1);
+  const bc = env.bin.center;
+  out.push([bc.x - 0.3, bc.z - 0.3, bc.x + 0.3, bc.z + 0.3]);
+  for (const n of workspace.topLevel()) {
+    if (exclude.has(n)) continue;
+    b.setFromObject(n);
+    if (b.max.y - b.min.y > 0.05 && b.min.y < 0.6) push(b, 0.1); // solo cose appoggiate a terra
+  }
+  return out;
+}
+
+/** Cerca un posto libero davanti a te (poi ai lati, poi più lontano) per un oggetto di raggio r. */
+function freeSpot(pos, fwd, r, startDist, occupied) {
+  const hits = (x, z) => occupied.some(([x0, z0, x1, z1]) => x + r > x0 && x - r < x1 && z + r > z0 && z - r < z1);
+  for (const extra of [0, 0.8, 1.8, 3.5, 6]) {
+    for (const deg of [0, 30, -30, 55, -55, 80, -80, 110, -110, 145, -145, 180]) {
+      const a = (deg * Math.PI) / 180;
+      const dir = new THREE.Vector3(fwd.x * Math.cos(a) - fwd.z * Math.sin(a), 0, fwd.x * Math.sin(a) + fwd.z * Math.cos(a));
+      const p = pos.clone().addScaledVector(dir, startDist + extra);
+      if (!hits(p.x, p.z)) return p;
+    }
+  }
+  return pos.clone().addScaledVector(fwd, startDist + 8);
+}
+
+/** Crea un oggetto del catalogo (o della libreria): sulla scrivania, davanti a te o dal cielo. */
+function spawnItem(item, { count = 1, size = 'auto', where = null, color = null } = {}) {
+  count = Math.max(1, Math.min(30, count));
+  const made = [];
+  const box = new THREE.Box3();
+  const dims = new THREE.Vector3();
+  const { pos, fwd, right } = headPose();
+  let usedMode = size;
+  for (let i = 0; i < count; i++) {
+    const node = item.build();
+    node.updateWorldMatrix(true, true);
+    box.setFromObject(node).getSize(dims);
+    const maxDim = Math.max(dims.x, dims.y, dims.z) || 0.1;
+    let mode = size;
+    if (item.fromLibrary) mode = size === 'giant' ? 'giant' : size === 'real' ? 'real' : 'desk';
+    // automatico: vero se ci sta sulla scrivania (o se lo vuoi accanto a te), altrimenti in miniatura
+    const fitsDesk = dims.x <= 1.0 && dims.z <= 0.62 && dims.y <= 0.75;
+    if (mode === 'auto') mode = where === 'front' || where === 'above' ? (maxDim <= 0.6 ? 'desk' : 'real') : fitsDesk ? 'desk' : 'mini';
+    usedMode = mode;
+    let scale = 1;
+    let place = where;
+    if (mode === 'mini') { scale = 0.28 / maxDim; place = place || 'desk'; }
+    else if (mode === 'desk') { place = place || 'desk'; }
+    else if (mode === 'real') { place = place || (fitsDesk ? 'desk' : 'front'); }
+    else if (mode === 'giant') { scale = Math.max(4, 2.5 / maxDim); place = place || 'front'; }
+    node.scale.multiplyScalar(scale);
+    if (color != null) node.traverse((o) => { if (o.userData.isPart) { o.material.color.setHex(color); o.userData.color = color; } });
+    if (place === 'desk') {
+      workspace.placeOnDesk(node);
+    } else {
+      // davanti a te (sul pavimento) o dal cielo, girato verso di te
+      const size3 = dims.clone().multiplyScalar(scale);
+      let target;
+      if (place === 'above') {
+        target = pos.clone().addScaledVector(fwd, 0.5 + Math.random() * 0.8).addScaledVector(right, (Math.random() - 0.5) * 1.6);
+      } else {
+        const r = Math.max(size3.x, size3.z) / 2;
+        target = freeSpot(new THREE.Vector3(pos.x, 0, pos.z), fwd, r, Math.max(1.0, r + 0.6), occupiedFootprints(new Set([node])));
+      }
+      workspace.root.add(node);
+      node.position.copy(workspace.root.worldToLocal(target.clone()));
+      node.rotation.y = Math.atan2(pos.x - target.x, pos.z - target.z);
+      node.updateWorldMatrix(true, true);
+      box.setFromObject(node);
+      const floorY = place === 'above' ? pos.y + 1.2 + i * 0.35 : 0.002;
+      node.position.y += floorY - box.min.y;
+      workspace.markDirty();
+    }
+    made.push(node);
+  }
+  workspace.selected = new Set(made);
+  workspace.highlightDirty = true;
+  workspace.markDirty();
+  const name = item.label.toLowerCase();
+  const how = { mini: ' in miniatura', giant: ' gigante', real: ' a grandezza reale', desk: '' }[usedMode] || '';
+  return count > 1 ? `Ecco ${count} × ${name}${how}.` : `Ecco: ${name}${how}.`;
+}
+ctx.spawn = spawnItem;
+
+/** Pioggia di oggetti: cadono dal cielo intorno a te (con la gravità). */
+ctx.rainObjects = (item, n = 8) => {
+  if (!physics.enabled) actions.run('gravity', { speak: false });
+  spawnItem(item, { count: n, size: 'auto', where: 'above' });
+  return `Pioggia di ${item.label.toLowerCase()} dal cielo!`;
+};
+
+let playerScale = 1;
+function setPlayerScale(s) {
+  playerScale = s;
+  rig.scale.setScalar(s);
+  xrInput.playerScale = s;
+}
+ctx.power = (id) => {
+  switch (id) {
+    case 'w:rain': weather.set('rain'); return 'Pioggia su tutto il mondo.';
+    case 'w:rain-local': weather.set('rain', { local: true }); return 'Ecco una nuvola tutta per te: piove sopra di te.';
+    case 'w:storm': weather.set('storm'); return 'Temporale!';
+    case 'w:storm-local': weather.set('storm', { local: true }); return 'Un temporale solo sopra di te.';
+    case 'w:bolt': weather.strike(); return 'Fulmine!';
+    case 'w:snow': weather.set('snow'); return 'Nevica.';
+    case 'w:snow-local': weather.set('snow', { local: true }); return 'Nevica solo su di te.';
+    case 'w:fog': weather.set('fog'); return 'Arriva la nebbia.';
+    case 'w:rainbow': weather.set('rainbow'); return 'Ecco un arcobaleno.';
+    case 'w:clear': weather.set('clear'); return 'Tempo sereno.';
+    case 'p:giant': setPlayerScale(6); return 'Ora sei un gigante: la scrivania è un giocattolo.';
+    case 'p:tiny': setPlayerScale(0.1); return 'Ora sei minuscolo come una formica.';
+    case 'p:normal': setPlayerScale(1); return 'Sei tornato alla tua misura.';
+    case 'p:fly': case 'p:fly-on': case 'p:fly-off': {
+      const on = id === 'p:fly' ? !xrInput.flying : id === 'p:fly-on';
+      xrInput.flying = on;
+      if (!on) rig.position.y = 0;
+      panel.setLabel('p:fly', on ? 'Volo: SÌ' : 'Volo: NO');
+      panel.setActive('p:fly', on);
+      return on ? 'Puoi volare: stick destro su e giù per salire e scendere.' : 'Atterrato.';
+    }
+    default: return null;
+  }
+};
+
+// comandi vocali con Whisper nel visore
+const voiceIn = new VoiceInput({
+  onText: (text) => { actions.announce(`Ho sentito: “${text}”`); ai.setSubtitle(`“${text}”`); command(text); },
+  onState: (st) => {
+    ai.listening = st === 'listening' || st === 'thinking';
+    const el = document.getElementById('voice-status');
+    if (el && st !== 'loading') el.textContent = { ready: 'Comandi vocali pronti ✓', continuous: 'In ascolto continuo ✓', listening: 'Ti ascolto…', thinking: 'Sto capendo…', off: '' }[st] ?? el.textContent;
+  },
+  isBusy: () => ai.speaking,
+});
+async function initVoice() {
+  const el = document.getElementById('voice-status');
+  try {
+    await voiceIn.init((p) => {
+      const pct = Math.round(p * 100);
+      if (el) el.textContent = `Scarico il riconoscimento vocale: ${pct}%`;
+      actions.announce(`Scarico il riconoscimento vocale: ${pct}% (solo la prima volta)`);
+    });
+    return true;
+  } catch (e) {
+    console.error(e);
+    if (el) el.textContent = 'Microfono non disponibile';
+    ai.say('Non riesco a usare il microfono. Attiva i comandi vocali dalla pagina iniziale.');
+    return false;
+  }
+}
+ctx.voiceTalk = () => {
+  if (!voiceIn.ready) { initVoice().then((ok) => ok && ai.say('Comandi vocali pronti: premi di nuovo e parla.')); return 'Preparo il riconoscimento vocale…'; }
+  voiceIn.start();
+  return null;
+};
+ctx.voiceContinuous = (on) => {
+  const apply = () => {
+    voiceIn.setContinuous(on);
+    panel.setLabel('listenAlways', on ? 'Ascolto: SÌ' : 'Ascolto: NO');
+    panel.setActive('listenAlways', on);
+  };
+  if (!voiceIn.ready) { initVoice().then((ok) => ok && apply()); return 'Attivo il microfono…'; }
+  apply();
+  return on ? 'Ti ascolto sempre: parla quando vuoi.' : 'Ascolto continuo spento.';
+};
+xrInput.onTalk = (down) => { if (down) ctx.voiceTalk(); else voiceIn.stop(); };
+document.getElementById('voice-btn')?.addEventListener('click', () => initVoice());
+document.getElementById('voice-quality')?.addEventListener('change', (e) => { voiceIn.setQuality(e.target.value); initVoice(); });
+
 // ---------------------------------------------------------------- pulsanti VR / realtà mista e impostazioni
 const vrBtn = document.getElementById('enter-vr');
 const mrBtn = document.getElementById('enter-mr');
@@ -367,6 +559,7 @@ renderer.setAnimationLoop(() => {
   panel.update(dt);
 
   physics.update(dt);
+  weather.update(dt);
   checkBin();
   actions.tickHistory(dt);
   themes.update(dt);
@@ -385,4 +578,4 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-window.officina = { hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
+window.officina = { weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
