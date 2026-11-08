@@ -11,7 +11,7 @@ const CACHE = 'officina-voce-v1';
 importScripts(ORT + 'ort.wasm.min.js', PHON + 'piper_phonemize.js');
 /* global ort, createPiperPhonemize */
 ort.env.wasm.wasmPaths = ORT;
-ort.env.wasm.numThreads = 1;
+ort.env.wasm.numThreads = self.crossOriginIsolated ? 2 : 1;
 
 let session = null;
 let voice = 'paola';

@@ -60,6 +60,11 @@
     #chat input { flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid #2b3440; background: rgba(14, 16, 20, 0.9); color: #e6edf5; font-size: 14px; }
     #chat button { padding: 10px 14px; border-radius: 10px; border: 1px solid #2b3440; background: #1c222b; color: #e6edf5; cursor: pointer; }
   </style>
+  <script>
+    // pagina "isolata": permette a voce e riconoscimento vocale di usare più processori del visore
+    window.coi = { coepCredentialless: () => true, quiet: true, shouldRegister: () => !navigator.webdriver };
+  </script>
+  <script src="./coi-serviceworker.js"></script>
   <script type="importmap">
     {
       "imports": {

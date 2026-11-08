@@ -165,6 +165,9 @@ export class Scanner {
     this.prevPose = null;
     this.skipped = 0;
     this.depth.scale = 1;
+    this.offset = null;
+    this.prevCaps = null;
+    this.poseHist = [];
     this.segs.forEach((s) => { s.material.opacity = 0.25; });
     this.ring.visible = true;
     this.preview ||= this.buildPreview();
@@ -226,22 +229,40 @@ export class Scanner {
     return n;
   }
 
-  /** Punti delle mani (da escludere: non fanno parte dell'oggetto). */
-  handPoints() {
-    const pts = [];
+  /**
+   * Le mani come "capsule" lungo le ossa (dita, palmo, avambraccio), un po' più grandi del vero
+   * perché il sensore è in ritardo rispetto al tracciamento: tutto ciò che ci cade dentro non è l'oggetto.
+   */
+  handCapsules() {
+    const caps = [];
+    const P = (c, n) => this.joint(c, n, new THREE.Vector3());
     for (const c of this.xrInput.controllers) {
-      const joints = c.userData.hand?.joints;
-      if (!joints) continue;
-      for (const j of Object.values(joints)) if (j.visible) pts.push(j.getWorldPosition(new THREE.Vector3()));
-      // avambraccio: qualche punto dietro il polso
-      const w = joints.wrist, m = joints['middle-finger-metacarpal'];
-      if (w?.visible && m?.visible) {
-        const a = w.getWorldPosition(new THREE.Vector3()), b = m.getWorldPosition(new THREE.Vector3());
-        const back = a.clone().sub(b).normalize();
-        for (let k = 1; k <= 5; k++) pts.push(a.clone().addScaledVector(back, k * 0.035));
+      if (!this.xrInput.isHand(c) || !c.userData.hand?.joints?.wrist?.visible) continue;
+      const add = (a, b, r) => { if (a && b) caps.push([a, b, r]); };
+      const wrist = P(c, 'wrist');
+      for (const f of ['index-finger', 'middle-finger', 'ring-finger', 'pinky-finger']) {
+        const chain = ['metacarpal', 'phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip'].map((n) => P(c, `${f}-${n}`));
+        add(wrist, chain[1], 0.024); // palmo
+        for (let k = 1; k < chain.length - 1; k++) add(chain[k], chain[k + 1], 0.015);
       }
+      const th = ['metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip'].map((n) => P(c, `thumb-${n}`));
+      add(wrist, th[0], 0.022);
+      for (let k = 0; k < th.length - 1; k++) add(th[k], th[k + 1], 0.016);
+      add(P(c, 'index-finger-phalanx-proximal'), P(c, 'pinky-finger-phalanx-proximal'), 0.018); // nocche
+      const mid = P(c, 'middle-finger-metacarpal');
+      if (wrist && mid) add(wrist, wrist.clone().add(wrist.clone().sub(mid).normalize().multiplyScalar(0.25)), 0.045); // avambraccio
     }
-    return pts;
+    return caps;
+  }
+
+  static outsideCapsules(caps, p) {
+    for (const [a, b, r] of caps) {
+      const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby + (p.z - a.z) * abz) / (abx * abx + aby * aby + abz * abz || 1)));
+      const dx = p.x - (a.x + abx * t), dy = p.y - (a.y + aby * t), dz = p.z - (a.z + abz * t);
+      if (dx * dx + dy * dy + dz * dz < r * r) return false;
+    }
+    return true;
   }
 
   /** Centro presunto dell'oggetto: davanti al palmo, tra pollice e dita. */
@@ -268,8 +289,9 @@ export class Scanner {
 
     this.camera.getWorldPosition(_h);
     if (tracked && this.centerLocal) {
-      // anello e puntini seguono l'oggetto mentre lo giri
-      const m = wristM.clone().multiply(new THREE.Matrix4().makeTranslation(this.centerLocal.x, this.centerLocal.y, this.centerLocal.z));
+      // anello e puntini seguono l'oggetto mentre lo giri (con le correzioni dell'allineamento)
+      const m = this.offset ? wristM.clone().multiply(this.offset.clone().invert())
+        : wristM.clone().multiply(new THREE.Matrix4().makeTranslation(this.centerLocal.x, this.centerLocal.y, this.centerLocal.z));
       this.preview.matrix.copy(m);
       this.preview.matrixWorldNeedsUpdate = true;
       this.ring.position.lerp(new THREE.Vector3().setFromMatrixPosition(m), Math.min(1, dt * 12));
@@ -292,8 +314,13 @@ export class Scanner {
     this.nextSample -= dt;
     if (tracked && this.nextSample <= 0 && !this.depth.busy) {
       this.nextSample = 0.12;
-      const hands = this.handPoints();
-      const keep = (p) => hands.every((h) => h.distanceToSquared(p) > 0.02 * 0.02);
+      // la mano adesso e com'era un attimo fa: il sensore è in ritardo rispetto al tracciamento
+      const capsNow = this.handCapsules();
+      const capsPrev = this.prevCaps && this.prevCaps.length === capsNow.length ? this.prevCaps : capsNow;
+      this.prevCaps = capsNow;
+      // e dove sarà tra un attimo (stesso movimento): copre il ritardo in entrambe le direzioni
+      const capsNext = capsNow.map(([a, b, r], i) => [a.clone().multiplyScalar(2).sub(capsPrev[i][0]), b.clone().multiplyScalar(2).sub(capsPrev[i][1]), r]);
+      const keep = (p) => Scanner.outsideCapsules(capsNow, p) && Scanner.outsideCapsules(capsPrev, p) && Scanner.outsideCapsules(capsNext, p);
       const inv = wristM.clone().invert();
       const palm = this.palmPoint();
       const rig = this.xrInput.rig?.matrixWorld;
@@ -302,9 +329,12 @@ export class Scanner {
       // solo letture "ferme": se giri troppo in fretta, il sensore (30 al secondo) resta indietro e sporca la forma
       const now = performance.now() / 1000;
       const pose = { q: quat.clone(), p: new THREE.Vector3().setFromMatrixPosition(wristM), t: now };
-      const prev = this.prevPose;
-      this.prevPose = pose;
-      const fast = prev && (prev.q.angleTo(pose.q) / Math.max(0.03, now - prev.t) > 1.1 || prev.p.distanceTo(pose.p) / Math.max(0.03, now - prev.t) > 0.25);
+      // velocità sull'ultimo mezzo secondo: il tremolio del tracciamento non conta, la rotazione vera sì
+      (this.poseHist ||= []).push(pose);
+      while (this.poseHist.length > 2 && now - this.poseHist[0].t > 0.5) this.poseHist.shift();
+      const prev = this.poseHist[0];
+      const span = Math.max(0.2, now - prev.t);
+      const fast = prev !== pose && (prev.q.angleTo(pose.q) / span > 0.8 || prev.p.distanceTo(pose.p) / span > 0.25);
       this.depth.sample(rig).then((res) => {
         if (!res || this.state !== 'capturing' || this.mode !== 'depth') return;
         // calibrazione: la profondità letta sulle dita deve coincidere con dove il visore sa che sono
@@ -337,8 +367,15 @@ export class Scanner {
           this.startQuat = quat.clone();
           return;
         }
-        const toLocal = new THREE.Matrix4().makeTranslation(-this.centerLocal.x, -this.centerLocal.y, -this.centerLocal.z).multiply(inv);
+        // previsione dal polso, con le correzioni già trovate (l'oggetto può scivolare nella mano)
+        const base = new THREE.Matrix4().makeTranslation(-this.centerLocal.x, -this.centerLocal.y, -this.centerLocal.z);
+        const pred = (this.offset || base).clone().multiply(inv);
+        // allineamento sulla forma già costruita: è questo che fa "ruotare la scansione" con l'oggetto
+        const toLocal = this.fusion.align(res.points, res.count, pred, keep);
+        if (!toLocal) { this.rejected = (this.rejected || 0) + 1; return; } // lettura che non combacia: la scarto invece di sporcare la forma
+        this.offset = toLocal.clone().multiply(wristM); // = correzione costante rispetto al polso
         this.fusion.integrate(res.points, res.count, toLocal, res.eye || _h, keep);
+        this.fusion.markHand(capsNow, toLocal);
       }).catch(() => {});
     }
 

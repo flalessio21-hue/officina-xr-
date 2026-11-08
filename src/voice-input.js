@@ -59,7 +59,7 @@ export class VoiceInput {
     const model = MODELS[this.quality] || MODELS.veloce;
     const ready = await new Promise((resolve, reject) => {
       this.pending.set('init', { resolve, reject });
-      this.worker.postMessage({ type: 'init', model, preferGpu: this.quality !== 'preciso' });
+      this.worker.postMessage({ type: 'init', model, preferGpu: false }); // la GPU serve alla VR: usarla per la voce fa scattare l'immagine
     });
     this.device = ready.device;
     this.asr = (audio) => new Promise((resolve, reject) => {

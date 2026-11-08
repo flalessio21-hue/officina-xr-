@@ -197,6 +197,8 @@ export class AIOrb {
     this.subCanvas.width = 2048; this.subCanvas.height = 320;
     this.subTex = new THREE.CanvasTexture(this.subCanvas);
     this.subTex.colorSpace = THREE.SRGBColorSpace;
+    this.subTex.generateMipmaps = false;
+    this.subTex.minFilter = THREE.LinearFilter;
     this.subtitle = new THREE.Mesh(
       new THREE.PlaneGeometry(4.8, 0.75),
       new THREE.MeshBasicMaterial({ map: this.subTex, transparent: true, depthWrite: false, opacity: 0, toneMapped: false, fog: false })
