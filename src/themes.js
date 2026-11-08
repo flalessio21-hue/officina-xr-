@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { glowTexture } from './textures.js';
+import { SkyBaker } from './sky.js';
+import { buildWorld } from './worlds.js';
 
 /**
  * Ambienti: cielo a 360°, pavimento, nebbia, luci e particelle.
@@ -12,23 +14,23 @@ export const THEMES = {
     say: 'Torniamo al buio.',
   },
   spazio: {
-    label: 'spazio profondo', sky: 'sky_space.jpg', floor: 'none', fog: null, env: 0.2,
-    hemi: [0x8090c0, 0.12], sun: [0xfff2e0, 1.4, [-0.8, 0.25, -0.5]], particles: 'dust',
+    label: 'spazio profondo', sky: 'sky_space.jpg', floor: 'none', fog: null, env: 0.6,
+    hemi: [0x8090c0, 0.35], sun: [0xfff2e0, 2.2, [-0.75, 0.22, -0.62]], particles: 'dust',
     say: 'Benvenuto nello spazio profondo.',
   },
   acqua: {
-    label: "sott'acqua", sky: 'sky_underwater.jpg', floor: 'floor_sand.jpg', fog: [0x0b4a68, 0.07], env: 0.35,
-    hemi: [0x7fd0ff, 0.7], sun: [0x9fe6ff, 1.1, [0.1, 1, 0.2]], particles: 'bubbles',
+    label: "sott'acqua", sky: 'sky_underwater.jpg', floor: 'floor_sand.jpg', fog: [0x06384f, 0.045], env: 0.6,
+    hemi: [0x7fd0ff, 0.8], sun: [0x9fe6ff, 1.4, [0.1, 1, 0.2]], particles: 'bubbles',
     say: "Siamo sott'acqua. Guarda le bolle.",
   },
   tramonto: {
-    label: 'tramonto nel deserto', sky: 'sky_sunset.jpg', floor: 'floor_sand.jpg', fog: [0x3a1e2a, 0.025], env: 0.4,
-    hemi: [0xffb080, 0.45], sun: [0xffa060, 2.2, [-0.9, 0.25, 0.3]], particles: 'dust',
+    label: 'tramonto nel deserto', sky: 'sky_sunset.jpg', floor: 'floor_sand.jpg', fog: [0x9a6050, 0.005], env: 0.7,
+    hemi: [0xffb080, 0.5], sun: [0xffa060, 2.6, [-0.92, 0.12, 0.32]], particles: 'dust',
     say: 'Tramonto nel deserto.',
   },
   aurora: {
-    label: 'aurora boreale', sky: 'sky_aurora.jpg', floor: 'floor_snow.jpg', fog: [0x0a1620, 0.035], env: 0.25,
-    hemi: [0x60ffc0, 0.3], sun: [0x80c0ff, 0.5, [0.2, 1, -0.6]], particles: 'snow',
+    label: 'aurora boreale', sky: 'sky_aurora.jpg', floor: 'floor_snow.jpg', fog: [0x0a1620, 0.008], env: 0.5,
+    hemi: [0x60ffc0, 0.35], sun: [0x9fc8ff, 0.7, [0.55, 0.42, -0.72]], particles: 'snow',
     say: "Ecco l'aurora boreale. Sta nevicando.",
   },
 };
@@ -38,9 +40,12 @@ export const THEME_ORDER = ['buio', 'spazio', 'acqua', 'tramonto', 'aurora'];
 const ASSETS = './assets/';
 
 export class ThemeManager {
-  constructor(scene, env) {
+  constructor(scene, env, renderer) {
     this.scene = scene;
     this.env = env;
+    this.baker = renderer ? new SkyBaker(renderer) : null;
+    this.roomEnv = scene.environment;
+    this.worlds = new Map();
     this.current = 'buio';
     this.loader = new THREE.TextureLoader();
     this.cache = new Map();
@@ -79,7 +84,7 @@ export class ThemeManager {
   }
 
   texture(name, repeat) {
-    const key = name + (repeat || '');
+    const key = name + (repeat || '') + (repeat === 1 ? Math.random() : '');
     if (!this.cache.has(key)) {
       const t = this.loader.load(ASSETS + name);
       t.colorSpace = THREE.SRGBColorSpace;
@@ -113,9 +118,20 @@ export class ThemeManager {
     this.current = id;
     const { scene, env } = this;
 
-    scene.background = th.sky ? this.texture(th.sky) : new THREE.Color(0x000000);
+    // cielo procedurale ad alta risoluzione (anche come riflesso sugli oggetti)
+    const sky = this.baker?.get(id);
+    scene.background = sky ? sky.background : (th.sky ? this.texture(th.sky) : new THREE.Color(0x000000));
+    scene.environment = sky ? sky.environment : this.roomEnv;
     scene.fog = th.fog ? new THREE.FogExp2(th.fog[0], th.fog[1]) : null;
     scene.environmentIntensity = th.env;
+
+    // scenografia dell'ambiente (costruita la prima volta che serve)
+    if (id !== 'buio' && !this.worlds.has(id)) {
+      const w = buildWorld(id, (name) => this.texture(name, 1));
+      if (w) { this.worlds.set(id, w); scene.add(w.group); }
+    }
+    for (const [wid, w] of this.worlds) w.group.visible = wid === id;
+    this.world = this.worlds.get(id) || null;
     env.hemi.color.setHex(th.hemi[0]);
     env.hemi.intensity = th.hemi[1];
 
@@ -128,7 +144,9 @@ export class ThemeManager {
     }
 
     const fm = env.floor.material;
-    env.floor.visible = th.floor !== 'none';
+    // il pavimento piatto resta solo nel buio (negli altri ambienti c'è il terreno);
+    // anche nascosto serve per il teletrasporto
+    env.floor.visible = id === 'buio';
     if (th.floor && th.floor !== 'none') {
       fm.map = this.texture(th.floor, 40);
       fm.color.setHex(0x8a8070);
@@ -151,9 +169,15 @@ export class ThemeManager {
     return true;
   }
 
+  /** Nasconde/mostra la scenografia (in realtà mista si vede la stanza vera). */
+  setDressingVisible(v) {
+    for (const [wid, w] of this.worlds) w.group.visible = v && wid === this.current;
+  }
+
   update(dt) {
-    if (!this.mode) return;
     this.time += dt;
+    if (this.world?.group.visible) for (const f of this.world.tick) f(dt, this.time);
+    if (!this.mode) return;
     const attr = this.points.geometry.attributes.position;
     const a = attr.array;
     for (let i = 0; i < this.seed.length; i++) {

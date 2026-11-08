@@ -61,7 +61,20 @@ function buildLamp(mats, blockers) {
   spot.shadow.camera.far = 3;
   spot.shadow.radius = 4;
 
-  lamp.add(base, ...joints, arm1, arm2, spring, head, spot, spot.target);
+  // fascio di luce visibile (polvere nell'aria), morbido ai bordi
+  const beamLen = p2.distanceTo(target) - 0.12;
+  const beamMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+    uniforms: { uOn: { value: 1 } },
+    vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'uniform float uOn; varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ float edge = pow(abs(dot(vN, vV)), 2.0); float along = pow(vUv.y, 1.5); gl_FragColor = vec4(vec3(1.0, 0.85, 0.6) * edge * along * 0.11 * uOn, 1.0); }',
+  });
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(0.42, beamLen, 48, 1, true), beamMat);
+  const dir = target.clone().sub(p2).normalize();
+  beam.position.copy(p2).addScaledVector(dir, 0.12 + beamLen / 2);
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
+
+  lamp.add(base, ...joints, arm1, arm2, spring, head, spot, spot.target, beam);
   blockers.push(base, arm1, arm2, shade);
 
   let on = true;
@@ -69,6 +82,7 @@ function buildLamp(mats, blockers) {
     on = !on;
     spot.visible = on;
     glow.visible = on;
+    beam.visible = on;
     bulbMat.color.setRGB(on ? 3.2 : 0.25, on ? 2.9 : 0.24, on ? 2.4 : 0.22);
     return on;
   };

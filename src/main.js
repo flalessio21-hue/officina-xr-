@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createEnvironment } from './environment.js';
+import { createEnvironment, DESK } from './environment.js';
+import { Hologram } from './hologram.js';
 import { AIOrb } from './ai.js';
 import { Workspace } from './workspace.js';
 import { Panel } from './panel.js';
@@ -56,7 +57,15 @@ env.deskRig.add(panel.mesh);
 env.deskRig.updateMatrixWorld(true);
 panel.mesh.lookAt(0, 1.25, 0);
 
-const themes = new ThemeManager(scene, env);
+const themes = new ThemeManager(scene, env, renderer);
+
+// l'AI è un ologramma sulla scrivania (angolo in fondo a sinistra): la vecchia luce lontana sparisce
+const hologram = new Hologram(env.deskRig, new THREE.Vector3(-0.5, DESK.h, -0.25), renderer);
+hologram.load(new URL('../assets/models/facecap.glb', import.meta.url).href).catch((e) => console.error('ologramma', e));
+for (const o of [ai.core, ai.inner, ai.outer, ai.glow, ai.halo, ai.motes]) if (o) o.visible = false;
+if (ai.light) ai.light.visible = false;
+ai.group.scale.setScalar(0.09); // sottotitoli piccoli, sopra la testa
+const _hv = new THREE.Vector3();
 const avatars = new Avatars(scene);
 let net = null; // stanze condivise: attive solo con Firebase configurato
 
@@ -153,6 +162,7 @@ function applyMixedLook(on) {
     scene.fog = null;
     env.floor.visible = false;
     themes.points.visible = false;
+    themes.setDressingVisible(false);
     renderer.setClearColor(0x000000, 0);
   } else {
     themes.apply(themes.current);
@@ -346,7 +356,11 @@ renderer.setAnimationLoop(() => {
 
   xrInput.update(dt);
   workspace.update(dt);
-  ai.update(dt, t, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
+  const viewCam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  hologram.root.getWorldPosition(_hv);
+  ai.base.set(_hv.x, _hv.y + hologram.headY + 0.2, _hv.z);
+  ai.update(dt, t, viewCam);
+  hologram.update(dt, { level: ai.level, state: ai.listening ? 'listening' : ai.speaking ? 'speaking' : 'idle', camera: viewCam });
 
   statusTimer -= dt;
   if (statusTimer <= 0) { panel.setStatus(actions.status()); statusTimer = 0.2; }
@@ -371,4 +385,4 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-window.officina = { brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
+window.officina = { hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
