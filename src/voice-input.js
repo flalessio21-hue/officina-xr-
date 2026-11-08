@@ -21,7 +21,7 @@ export class VoiceInput {
 
   set(state, info) { this.state = state; this.onState(state, info); }
 
-  get ready() { return !!this.asr && !!this.ctx; }
+  get ready() { return !!this.asr && !!this.ctx && !!this.stream; }
 
   /** Microfono + modello. Da chiamare con un tocco dell'utente. onProgress(0..1). */
   async init(onProgress) {
@@ -31,6 +31,7 @@ export class VoiceInput {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       const AC = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AC({ sampleRate: 16000 });
+      this.stream.getAudioTracks()[0]?.addEventListener('ended', () => { this.stream = null; this.set('error', 'mic-ended'); });
       const src = this.ctx.createMediaStreamSource(this.stream);
       const proc = this.ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = (e) => this.onAudio(e.inputBuffer.getChannelData(0));
@@ -88,6 +89,7 @@ export class VoiceInput {
     this.heard = false;
     this.silence = 0;
     this.elapsed = 0;
+    this.continuousTake = false;
     this.set('listening');
   }
 
@@ -108,11 +110,16 @@ export class VoiceInput {
     for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
     const rms = Math.sqrt(sum / data.length);
     const dt = data.length / this.rate;
-    const speech = rms > 0.02;
+    // soglia che si adatta al rumore della stanza (il microfono del Quest è più basso di quello di un PC)
+    this.level = rms;
+    if (!this.recording || !this.heard) this.noise = this.noise == null ? rms : this.noise * 0.97 + Math.min(rms, 0.05) * 0.03;
+    const speech = rms > Math.max(0.006, (this.noise || 0) * 3);
+    if (rms > 0) this.gotSignal = true;
     // ascolto continuo: parte da solo quando senti parlare (e l'AI non sta parlando)
     if (this.continuous && !this.recording && speech && !this.isBusy() && this.state !== 'thinking') {
       this.start();
       this.continuousTake = true;
+      this.heard = true;
     }
     if (!this.recording) return;
     this.chunks.push(new Float32Array(data));
@@ -120,7 +127,9 @@ export class VoiceInput {
     if (speech) { this.heard = true; this.silence = 0; } else this.silence += dt;
     if ((this.heard && this.silence > 0.9) || this.elapsed > 9 || (!this.heard && this.elapsed > 5)) {
       this.recording = false;
-      if (this.heard) this.transcribe(); else this.set(this.continuous ? 'continuous' : 'ready');
+      if (this.heard) this.transcribe();
+      else if (!this.continuousTake) this.set('nothing', this.gotSignal ? 'quiet' : 'silent');
+      else this.set(this.continuous ? 'continuous' : 'ready');
     }
   }
 

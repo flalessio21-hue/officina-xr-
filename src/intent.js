@@ -19,6 +19,28 @@ function lev(a, b) {
   return d[a.length][b.length];
 }
 
+// parole importanti che Whisper a volte storpia o spezza ("fai di ovvere", "nell'ospazio", "crè")
+const VOCAB = ['piovere', 'pioggia', 'nevicare', 'temporale', 'arcobaleno', 'nebbia', 'spazio', 'oceano', 'tramonto', 'aurora',
+  'scansiona', 'scansione', 'smonta', 'rimonta', 'esplodi', 'ricomponi', 'gravita', 'scrivania', 'annulla', 'cancella', 'elimina',
+  'ingrandisci', 'rimpicciolisci', 'gigante', 'minuscolo', 'volare'];
+const FIX = { cre: 'crea', crei: 'crea', crep: 'crea', creo: 'crea', fammi: 'fammi', piove: 'piove' };
+export function fixTranscript(text) {
+  const w = norm(text).replace(/'/g, "' ").split(' ').filter(Boolean).map((x) => FIX[x] || x);
+  const out = [];
+  for (let i = 0; i < w.length; i++) {
+    const a = w[i].replace(/'$/, ''), b = w[i + 1];
+    // due parole che insieme somigliano a una parola chiave: "di ovvere" -> "piovere"
+    if (b && a.length <= 4 && !VOCAB.includes(b)) {
+      const joined = a + b;
+      const hit = VOCAB.find((v) => v.length >= 6 && lev(joined, v) <= 2 && lev(b, v) > 1);
+      if (hit) { out.push(hit); i++; continue; }
+    }
+    const one = a.length >= 5 && !VOCAB.includes(a) ? VOCAB.find((v) => lev(a, v) <= (v.length >= 8 ? 2 : 1)) : null;
+    out.push(one || w[i]);
+  }
+  return out.join(' ').replace(/' /g, "'");
+}
+
 /** La parola [w] corrisponde alla parola chiave [k]? strict = senza errori di trascrizione */
 export function wordMatch(w, k, strict = false) {
   if (w === k) return true;

@@ -274,6 +274,19 @@ export class AIOrb {
     this.setSubtitle(text);
     this.speakUntil = performance.now() / 1000 + 0.8 + text.length * 0.065;
     this.speaking = true;
+    if (this.neural?.ready) {
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      this.neuralSpeaking = true;
+      this.speakUntil = performance.now() / 1000 + 60;
+      const gen = (this.sayGen = (this.sayGen || 0) + 1);
+      this.neural.speak(text, { pitch: 1 + (this.pitch - 1) * 0.3 }).finally(() => {
+        if (gen !== this.sayGen) return;
+        this.neuralSpeaking = false;
+        this.speaking = false;
+        this.subTimer = 2.5;
+      });
+      return;
+    }
     if (!('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -293,6 +306,14 @@ export class AIOrb {
     this.ttsFailed = false;
     u.onboundary = () => { this.impulse = 1; };
     speechSynthesis.speak(u);
+  }
+
+  stopSpeaking() {
+    this.sayGen = (this.sayGen || 0) + 1;
+    this.neural?.cancel();
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    this.neuralSpeaking = false;
+    this.speaking = false;
   }
 
   listen() {
@@ -338,7 +359,7 @@ export class AIOrb {
       this.subtitle.lookAt(this.tmpV);
     }
     const now = performance.now() / 1000;
-    if (this.speaking && now > this.speakUntil + 4) this.speaking = false;
+    if (this.speaking && !this.neuralSpeaking && now > this.speakUntil + 4) this.speaking = false;
     if (this.speaking && (this.ttsFailed || !('speechSynthesis' in window)) && now > this.speakUntil) {
       this.speaking = false;
       this.subTimer = 2.5;
@@ -348,7 +369,9 @@ export class AIOrb {
     let target;
     if (this.speaking) {
       const syll = 0.6 * vnoise1(t * 6.2) + 0.4 * vnoise1(t * 2.4 + 10);
-      target = 0.38 + 0.62 * Math.pow(syll, 1.3) + this.impulse * 0.25;
+      target = this.neuralSpeaking
+        ? 0.2 + 0.9 * this.neural.level()
+        : 0.38 + 0.62 * Math.pow(syll, 1.3) + this.impulse * 0.25;
     } else if (this.listening) {
       target = 0.3 + 0.08 * Math.sin(t * 3.2) + this.impulse * 0.2;
     } else {

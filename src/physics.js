@@ -68,9 +68,12 @@ export class Physics {
     for (const mesh of [this.env.deskTop, this.env.mat]) {
       if (!mesh.visible) continue; // scrivania nascosta (realtà mista)
       mesh.updateWorldMatrix(true, false);
-      _box.setFromObject(mesh);
-      const size = _box.getSize(new THREE.Vector3());
-      add(new CANNON.Box(new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2)), _box.getCenter(new THREE.Vector3()));
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const gb = mesh.geometry.boundingBox;
+      mesh.matrixWorld.decompose(_v, _q, _s);
+      const size = gb.getSize(new THREE.Vector3()).multiply(_s);
+      const center = gb.getCenter(new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+      add(new CANNON.Box(new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2)), center, _q.clone());
     }
     // pareti del cestino (otto lastre attorno al bordo)
     const { center, radius, height } = this.env.bin;
@@ -80,7 +83,12 @@ export class Physics {
       add(new CANNON.Box(new CANNON.Vec3(0.005, height / 2, radius * 0.42)),
         new THREE.Vector3(center.x + Math.cos(a) * radius, height / 2, center.z + Math.sin(a) * radius), q);
     }
-    this.deskY = this.env.deskRig.position.y;
+    this.deskY = this.deskKey();
+  }
+
+  deskKey() {
+    const r = this.env.deskRig;
+    return `${r.position.x.toFixed(4)},${r.position.y.toFixed(4)},${r.position.z.toFixed(4)},${r.rotation.y.toFixed(4)}`;
   }
 
   /** Scatola d'ingombro dell'oggetto nel suo sistema locale (già scalata). */
@@ -122,7 +130,7 @@ export class Physics {
 
   update(dt) {
     if (!this.enabled || !this.world) return;
-    if (this.env.deskRig.position.y !== this.deskY) this.buildStatic();
+    if (this.deskKey() !== this.deskY) this.buildStatic();
 
     const nodes = new Set(this.ws.topLevel());
     for (const [n, parent] of this.ws.grabbing) if (parent === this.ws.root && !n.userData.deleted) nodes.add(n);

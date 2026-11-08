@@ -1,10 +1,12 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { applyPhotos } from './photo-texture.js';
 
 export const PALETTE = [0xd0d4da, 0x4f8cff, 0xff6b4a, 0x45d483, 0xffc845, 0xb57bff, 0x2b2f36, 0xb87333];
 
 export const KIND_NAMES = {
   box: 'Cubo', cylinder: 'Cilindro', sphere: 'Sfera', cone: 'Cono',
-  torus: 'Toro', tube: 'Tubo', gear: 'Ingranaggio',
+  torus: 'Toro', tube: 'Tubo', gear: 'Ingranaggio', rbox: 'Blocco', lathe: 'Corpo tornito', extrude: 'Sagoma',
 };
 
 export const DEFAULTS = {
@@ -47,6 +49,29 @@ function extrudeFlat(shape, h) {
 
 const builders = {
   box: (p) => new THREE.BoxGeometry(p.w, p.h, p.d),
+  // blocco con spigoli arrotondati (telefoni, telecomandi, scatole…)
+  rbox: (p) => new RoundedBoxGeometry(p.w, p.h, p.d, 4, Math.min(p.radius || 0.002, p.w / 2, p.h / 2, p.d / 2) * 0.999),
+  // solido di rotazione da un profilo [raggio, altezza] (tazze, bottiglie, vasi, lampadine…)
+  lathe: (p) => {
+    const pts = (p.profile || []).map(([r, y]) => new THREE.Vector2(Math.max(0, r), y));
+    if (pts.length < 2) return new THREE.CylinderGeometry(0.03, 0.03, 0.06, 32);
+    const h0 = Math.min(...pts.map((v) => v.y)), h1 = Math.max(...pts.map((v) => v.y));
+    const g = new THREE.LatheGeometry(pts, 64);
+    g.translate(0, -(h0 + h1) / 2, 0);
+    return g;
+  },
+  // sagoma vista di fronte (contorno X-Y) con spessore lungo Z e bordi smussati
+  extrude: (p) => {
+    const pts = p.outline || [];
+    if (pts.length < 3) return new THREE.BoxGeometry(0.05, 0.05, p.d || 0.01);
+    const s = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+    const bev = Math.min(p.bevel ?? 0.0015, p.d / 3);
+    const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.0005, p.d - bev * 2), bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev, bevelSegments: 3, curveSegments: 24 });
+    g.computeBoundingBox();
+    const c = g.boundingBox.getCenter(new THREE.Vector3());
+    g.translate(-c.x, -c.y, -c.z);
+    return g;
+  },
   cylinder: (p) => new THREE.CylinderGeometry(p.r2 ?? p.r, p.r, p.h, p.seg ?? 40),
   sphere: (p) => new THREE.SphereGeometry(p.r, 32, 20),
   cone: (p) => new THREE.ConeGeometry(p.r, p.h, p.seg ?? 40),
@@ -79,7 +104,18 @@ const METALS = new Set([0xc9ced6, 0x9aa0a8, 0xffc845, 0xb87333, 0xd4af37, 0xd0d4
 export function createPart(kind, params = DEFAULTS[kind], color = PALETTE[0], name) {
   const geo = builders[kind](params);
   const metal = METALS.has(color);
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: metal ? 0.3 : 0.5, metalness: metal ? 0.9 : 0.05 });
+  const m = params.mat || {};
+  const opacity = m.opacity ?? 1;
+  const opts = {
+    color,
+    roughness: m.roughness ?? (metal ? 0.3 : 0.5),
+    metalness: m.metalness ?? (metal ? 0.9 : 0.05),
+    transparent: opacity < 0.99, opacity,
+  };
+  // la vernice lucida (clearcoat) costa di più al visore: solo se serve
+  const mat = m.clearcoat > 0
+    ? new THREE.MeshPhysicalMaterial({ ...opts, clearcoat: m.clearcoat, clearcoatRoughness: 0.2 })
+    : new THREE.MeshStandardMaterial(opts);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -221,7 +257,9 @@ export function serializeNode(node) {
   const pos = exploded ? node.userData.homePos : node.position;
   const base = { name: node.name, p: r5(pos.toArray()), q: r5(node.quaternion.toArray()), s: r5(node.scale.toArray()) };
   if (node.userData.isAssembly) {
-    return { ...base, type: 'asm', children: node.children.filter(isNode).map(serializeNode) };
+    const out = { ...base, type: 'asm', children: node.children.filter(isNode).map(serializeNode) };
+    if (node.userData.photos) out.photos = node.userData.photos;
+    return out;
   }
   return { ...base, type: 'part', kind: node.userData.kind, params: node.userData.params, color: node.userData.color };
 }
@@ -233,5 +271,6 @@ export function deserializeNode(d) {
   node.position.fromArray(d.p);
   node.quaternion.fromArray(d.q);
   node.scale.fromArray(d.s);
+  if (d.type === 'asm' && d.photos) applyPhotos(node, d.photos);
   return node;
 }

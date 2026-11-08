@@ -4,6 +4,9 @@ import { createEnvironment, DESK } from './environment.js';
 import { Hologram } from './hologram.js';
 import { Weather } from './weather.js';
 import { VoiceInput } from './voice-input.js';
+import { NeuralVoice } from './tts.js';
+import { DeskGrab } from './desk-grab.js';
+import { Scanner } from './scanner.js';
 import { AIOrb } from './ai.js';
 import { Workspace } from './workspace.js';
 import { Panel } from './panel.js';
@@ -194,7 +197,16 @@ ctx.mixedReality = () => {
 
 const brain = new Brain({
   workspace, actions, ai, themes, physics, env, panel,
-  extra: { buildFromSpec, setSizeMm, setDeskVisible, enterMixedReality: () => ctx.mixedReality() || 'Fatto.', isMixedReality: () => mixedReality },
+  extra: {
+    buildFromSpec, setSizeMm, setDeskVisible,
+    spawnItem: (item, opts) => spawnItem(item, opts),
+    scan: () => ctx.scan?.(),
+    buildRealistic: (input) => {
+      const node = scanner.buildFromScan({ name: input.name, parts: input.parts }, []);
+      if (!node) return null;
+      spawnItem({ label: node.name, build: () => node }, { size: input.scale === 'desk' ? 'mini' : 'real' });
+      return node;
+    }, enterMixedReality: () => ctx.mixedReality() || 'Fatto.', isMixedReality: () => mixedReality },
 });
 
 /** Ogni comando (voce, testo, pannello «Parla con AI») passa da qui. */
@@ -204,25 +216,16 @@ function command(text) {
 }
 ai.onHeard = command;
 
-ctx.scan = async () => {
-  if (!brain.enabled) {
-    ai.say('Per la scansione serve l\'intelligenza artificiale: inserisci la chiave nella pagina iniziale.');
-    return;
-  }
-  try {
-    if (!camera3.ready) await camera3.start();
-  } catch {
-    ai.say('Non vedo dalla fotocamera. Nella pagina iniziale tocca «Abilita fotocamera», poi riprova.');
-    return;
-  }
-  ai.say('Tieni l\'oggetto davanti agli occhi e giralo piano.');
-  await new Promise((r) => setTimeout(r, 2500));
-  const shots = await camera3.burst(4, 900, (i, n) => actions.announce(`Scansione: foto ${i} di ${n}…`));
-  ai.say('Fatto. Lo sto ricostruendo.');
-  await brain.scan(shots);
-};
 
 const xrInput = new XRInput(renderer, scene, rig, camera, { panel, workspace, actions, env });
+const deskGrab = new DeskGrab(env);
+xrInput.desk = deskGrab;
+ctx.deskGrab = deskGrab;
+const scanner = new Scanner({
+  scene, camera, xrInput, headsetCamera: camera3, brain, ai, actions, workspace,
+  isMixedReality: () => mixedReality,
+});
+ctx.scan = () => scanner.start(null);
 env.turn = (a) => xrInput.turn(a);
 env.home = () => xrInput.home();
 new MouseInput(renderer, camera, controls, { panel, workspace, actions });
@@ -355,7 +358,7 @@ function spawnItem(item, { count = 1, size = 'auto', where = null, color = null 
     else if (mode === 'real') { place = place || (fitsDesk ? 'desk' : 'front'); }
     else if (mode === 'giant') { scale = Math.max(4, 2.5 / maxDim); place = place || 'front'; }
     node.scale.multiplyScalar(scale);
-    if (color != null) node.traverse((o) => { if (o.userData.isPart) { o.material.color.setHex(color); o.userData.color = color; } });
+    if (color != null) node.traverse((o) => { if (o.userData.isPart) { [].concat(o.material)[0].color.setHex(color); o.userData.color = color; } });
     if (place === 'desk') {
       workspace.placeOnDesk(node);
     } else {
@@ -429,10 +432,22 @@ ctx.power = (id) => {
 };
 
 // comandi vocali con Whisper nel visore
+const neural = new NeuralVoice();
+ai.neural = neural;
+neural.onState = (st, p) => {
+  const el = document.getElementById('voice-status');
+  if (!el) return;
+  if (st === 'loading') el.textContent = `Scarico la voce dell'assistente: ${Math.round((p || 0) * 100)}%`;
+  if (st === 'error') el.textContent = 'Voce dell\'assistente non disponibile: userò i sottotitoli.';
+};
 const voiceIn = new VoiceInput({
-  onText: (text) => { actions.announce(`Ho sentito: “${text}”`); ai.setSubtitle(`“${text}”`); command(text); },
-  onState: (st) => {
+  onText: (text) => { actions.announce(`Ho sentito: “${text}”`); ai.setSubtitle(`Ho sentito: “${text}”`); command(text); },
+  onState: (st, info) => {
     ai.listening = st === 'listening' || st === 'thinking';
+    if (st === 'listening') { ai.stopSpeaking?.(); ai.setSubtitle('🎤 Ti ascolto…'); }
+    if (st === 'thinking') ai.setSubtitle('Sto capendo…');
+    if (st === 'nothing') ai.setSubtitle(info === 'silent' ? 'Il microfono non manda audio. Controlla i permessi del browser.' : 'Non ho sentito niente: tieni premuto A e parla più vicino.');
+    if (st === 'error') ai.say('Ho perso il microfono. Tocca «Attiva voce» nella pagina iniziale.');
     const el = document.getElementById('voice-status');
     if (el && st !== 'loading') el.textContent = { ready: 'Comandi vocali pronti ✓', continuous: 'In ascolto continuo ✓', listening: 'Ti ascolto…', thinking: 'Sto capendo…', off: '' }[st] ?? el.textContent;
   },
@@ -470,7 +485,26 @@ ctx.voiceContinuous = (on) => {
   return on ? 'Ti ascolto sempre: parla quando vuoi.' : 'Ascolto continuo spento.';
 };
 xrInput.onTalk = (down) => { if (down) ctx.voiceTalk(); else voiceIn.stop(); };
-document.getElementById('voice-btn')?.addEventListener('click', () => initVoice());
+async function enableVoice() {
+  neural.unlock(); // sblocca l'audio con il tocco e scarica la voce in parallelo
+  const ok = await initVoice();
+  await neural.load();
+  const el = document.getElementById('voice-status');
+  if (ok && el) el.textContent = neural.state === 'ready' ? 'Voce e microfono pronti ✓ In VR tieni premuto A (o X) e parla.' : 'Microfono pronto ✓ (voce dell\'assistente non disponibile)';
+  if (ok) ai.say('Eccomi. Ti sento.');
+  return ok;
+}
+document.getElementById('voice-btn')?.addEventListener('click', () => enableVoice());
+// entrando in VR il tocco sblocca l'audio; se il microfono era già permesso, si prepara tutto da solo
+async function prepareVoiceOnEnter() {
+  neural.unlock();
+  let granted = false;
+  try { granted = (await navigator.permissions?.query({ name: 'microphone' }))?.state === 'granted'; } catch { /* non supportato */ }
+  if (granted && !voiceIn.ready) initVoice();
+  try {
+    if ((await navigator.permissions?.query({ name: 'camera' }))?.state === 'granted' && !camera3.ready) camera3.start().catch(() => {});
+  } catch { /* non supportato */ }
+}
 document.getElementById('voice-quality')?.addEventListener('change', (e) => { voiceIn.setQuality(e.target.value); initVoice(); });
 
 // ---------------------------------------------------------------- pulsanti VR / realtà mista e impostazioni
@@ -484,10 +518,10 @@ async function updateXRButtons() {
   mrBtn.hidden = !ar;
 }
 updateXRButtons();
-vrBtn.addEventListener('click', () => startSession('immersive-vr').catch((e) => alert('Non riesco a entrare in VR: ' + e.message)));
-mrBtn.addEventListener('click', () => startSession('immersive-ar').catch((e) => alert('Realtà mista non disponibile: ' + e.message)));
+vrBtn.addEventListener('click', () => prepareVoiceOnEnter() && startSession('immersive-vr').catch((e) => alert('Non riesco a entrare in VR: ' + e.message)));
+mrBtn.addEventListener('click', () => prepareVoiceOnEnter() && startSession('immersive-ar').catch((e) => alert('Realtà mista non disponibile: ' + e.message)));
 
-// AI con Claude e scansione: in pausa (vedi src/features.js)
+// AI con Claude e scansione (vedi src/features.js)
 document.getElementById('ai-settings').hidden = !FEATURES.claudeAI;
 const keyInput = document.getElementById('ai-key');
 const keyStatus = document.getElementById('ai-status');
@@ -547,6 +581,7 @@ renderer.setAnimationLoop(() => {
   const t = clock.elapsedTime;
 
   xrInput.update(dt);
+  scanner.update(dt);
   workspace.update(dt);
   const viewCam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
   hologram.root.getWorldPosition(_hv);
@@ -578,4 +613,4 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-window.officina = { weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
+window.officina = { scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };

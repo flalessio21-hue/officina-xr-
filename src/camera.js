@@ -40,6 +40,17 @@ export class HeadsetCamera {
     this.video = null;
   }
 
+  /** Il fotogramma attuale su una tela (a piena risoluzione, max 1280 px). */
+  canvas() {
+    const v = this.video;
+    const k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(v.videoWidth * k);
+    c.height = Math.round(v.videoHeight * k);
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    return c;
+  }
+
   /** Un fotogramma come JPEG base64 (lato lungo max 1024 px). */
   frame() {
     const v = this.video;

@@ -101,7 +101,7 @@ export class Workspace {
         if (this.selected.has(a)) sel = true;
         if (a === this.hover) hov = true;
       }
-      o.material.emissive.setHex(sel ? 0x143f78 : hov ? 0x2c2c2c : 0x000000);
+      for (const m of [].concat(o.material)) m.emissive?.setHex(sel ? 0x143f78 : hov ? 0x2c2c2c : 0x000000);
     });
     this.highlightDirty = false;
   }
@@ -182,7 +182,7 @@ export class Workspace {
       n.userData.deleted = true;
       this.anims.delete(n);
       n.removeFromParent();
-      n.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      n.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); for (const m of [].concat(o.material)) { m.map?.dispose(); m.dispose(); } } });
     }
     this.selected.clear();
     this.pruneEmpty();
@@ -463,7 +463,7 @@ export class Workspace {
       next = PALETTE[(PALETTE.indexOf(current) + 1) % PALETTE.length];
     }
     for (const n of sel) n.traverse((o) => {
-      if (o.userData.isPart) { o.material.color.setHex(next); o.userData.color = next; }
+      if (o.userData.isPart) { [].concat(o.material)[0].color.setHex(next); o.userData.color = next; }
     });
     this.markDirty();
     return true;
@@ -570,7 +570,7 @@ export class Workspace {
     this.anims.delete(node);
     node.userData.deleted = true;
     node.removeFromParent();
-    node.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+    node.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); for (const m of [].concat(o.material)) { m.map?.dispose(); m.dispose(); } } });
     this.highlightDirty = true;
   }
 

@@ -3,7 +3,7 @@ import { THEMES, ThemeManager } from './themes.js';
 import { LIBRARY } from './library.js';
 import { FEATURES } from './features.js';
 import { CATALOG } from './catalog.js';
-import { norm, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE } from './intent.js';
+import { norm, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE, fixTranscript } from './intent.js';
 
 const b = (id, label) => ({ id, label });
 
@@ -14,20 +14,7 @@ const SIZE_LABEL = { auto: 'Misura: AUTO', mini: 'Misura: MINI', real: 'Misura: 
 /** Il pannello a sinistra della scrivania, diviso in schede. */
 export const PANEL_TABS = [
   {
-    id: 'crea', label: 'Crea', color: '#3fa9ff', hint: 'Tocca una forma: compare sulla scrivania, poi prendila con la mano.',
-    buttons: [
-      b('box', 'Cubo'), b('sphere', 'Sfera'), b('cylinder', 'Cilindro'), b('cone', 'Cono'),
-      b('pyramid', 'Piramide'), b('torus', 'Toro'), b('tube', 'Tubo'), b('gear', 'Ingranaggio'),
-      b('screw', 'Vite + dado'), b('duplicate', 'Duplica'), b('color', 'Colore'), b('undo', 'Annulla'),
-      ...(FEATURES.claudeAI ? [b('scan', 'Scansiona oggetto')] : []),
-    ],
-  },
-  {
-    id: 'libreria', label: 'Libreria', color: '#ffc845', hint: 'Oggetti già montati: smontali pezzo per pezzo (scheda Smonta).',
-    buttons: LIBRARY.map((it) => b('lib:' + it.id, it.label)),
-  },
-  {
-    id: 'oggetti', label: 'Oggetti', color: '#ff7fd0', hint: 'Scegli una categoria, poi tocca un oggetto. AUTO: piccolo sulla scrivania, REALE: vero, davanti a te.',
+    id: 'oggetti', label: 'Crea', color: '#3fa9ff', hint: 'Scegli una categoria e tocca un oggetto, oppure chiedilo a voce. In realtà mista prendi un oggetto vero in mano per scansionarlo.',
     get buttons() {
       const cat = CATALOG.find((c) => c.id === objectMenu.cat) || CATALOG[0];
       const items = cat.items.map((it) => b('obj:' + it.id, it.label));
@@ -35,34 +22,13 @@ export const PANEL_TABS = [
       return [
         ...CATALOG.map((c) => b('cat:' + c.id, (c.id === objectMenu.cat ? '● ' : '') + c.label)),
         ...items.slice(0, 8),
-        b('size', SIZE_LABEL[objectMenu.size]), b('undo', 'Annulla'), b('delete', 'Elimina'), b('clear', 'Svuota'),
+        b('scan', 'Scansiona oggetto'), b('size', SIZE_LABEL[objectMenu.size]), b('undo', 'Annulla'), b('delete', 'Elimina'),
       ];
     },
   },
   {
-    id: 'poteri', label: 'Poteri', color: '#ffd84a', hint: 'Sei il dio di questo mondo. Puoi anche dirlo a voce: «fai piovere sopra di me».',
-    buttons: [
-      b('w:rain', 'Pioggia'), b('w:rain-local', 'Pioggia su di me'), b('w:storm', 'Temporale'), b('w:bolt', 'Fulmine'),
-      b('w:snow', 'Neve'), b('w:fog', 'Nebbia'), b('w:rainbow', 'Arcobaleno'), b('w:clear', 'Sereno'),
-      b('p:giant', 'Diventa gigante'), b('p:tiny', 'Diventa minuscolo'), b('p:normal', 'Misura normale'), b('p:fly', 'Volo: NO'),
-      b('rainPizza', 'Pioggia di pizze'), b('gravity', 'Gravità: NO'), b('talk', 'Parla (A)'), b('listenAlways', 'Ascolto: NO'),
-    ],
-  },
-  {
-    id: 'modifica', label: 'Modifica', color: '#45d483', hint: 'Agisce sugli oggetti selezionati (evidenziati in blu).',
-    buttons: [
-      b('duplicate', 'Duplica'), b('delete', 'Elimina'), b('group', 'Raggruppa'), b('ungroup', 'Separa'),
-      b('rotate', 'Ruota 45°'), b('flip', 'Capovolgi'), b('color', 'Colore'), b('multi', 'Multi: NO'),
-      b('selectAll', 'Seleziona tutto'), b('deselect', 'Deseleziona'), b('undo', 'Annulla'), b('redo', 'Ripeti'),
-    ],
-  },
-  {
-    id: 'misure', label: 'Misure', color: '#ff9f43', hint: 'Oppure prendi l’oggetto con due mani e allargale.',
-    buttons: [
-      b('s+', 'Scala +'), b('s-', 'Scala −'), b('resetScale', 'Misura originale'), b('measure', 'Quanto misura?'),
-      b('sx+', 'Largh +'), b('sx-', 'Largh −'), b('sy+', 'Alt +'), b('sy-', 'Alt −'),
-      b('sz+', 'Prof +'), b('sz-', 'Prof −'), b('s*2', 'Doppio'), b('s/2', 'Metà'),
-    ],
+    id: 'libreria', label: 'Da smontare', color: '#ffc845', hint: 'Oggetti meccanici completi, con tutti i pezzi interni: aprili nella scheda Smonta.',
+    buttons: LIBRARY.map((it) => b('lib:' + it.id, it.label)),
   },
   {
     id: 'smonta', label: 'Smonta', color: '#ff6b4a', hint: 'Doppio pizzico apre/chiude · pizzico lungo estrae un pezzo · due mani allargano.',
@@ -72,20 +38,28 @@ export const PANEL_TABS = [
     ],
   },
   {
-    id: 'mondo', label: 'Mondo', color: '#b57bff', hint: 'Il tuo mondo privato: ambiente, gravità, luce e posizione.',
+    id: 'modifica', label: 'Modifica', color: '#45d483', hint: 'Agisce sugli oggetti selezionati (evidenziati in blu). Per ingrandire puoi anche allargare due mani.',
     buttons: [
-      b('theme:buio', 'Buio'), b('theme:spazio', 'Spazio'), b('theme:acqua', "Sott'acqua"), b('theme:tramonto', 'Tramonto'),
-      b('theme:aurora', 'Aurora'), b('gravity', 'Gravità: NO'), b('lamp', 'Lampada'), b('home', 'Torna qui'),
-      b('turnL', 'Gira ◀'), b('turnR', 'Gira ▶'), b('deskUp', 'Scrivania ▲'), b('deskDown', 'Scrivania ▼'),
-      b('mr', 'Realtà mista'), b('deskToggle', 'Scrivania: SÌ'),
+      b('duplicate', 'Duplica'), b('delete', 'Elimina'), b('rotate', 'Ruota 45°'), b('color', 'Colore'),
+      b('s+', 'Più grande'), b('s-', 'Più piccolo'), b('resetScale', 'Misura originale'), b('measure', 'Quanto misura?'),
+      b('selectAll', 'Seleziona tutto'), b('deselect', 'Deseleziona'), b('undo', 'Annulla'), b('redo', 'Ripeti'),
     ],
   },
   {
-    id: 'sistema', label: 'Sistema', color: '#7fe3ff', hint: 'Tutto resta salvato su questo visore: è il tuo mondo personale.',
+    id: 'mondo', label: 'Mondo', color: '#b57bff', hint: 'Ambiente e tempo. La scrivania la sposti prendendo le maniglie luminose sul bordo.',
+    buttons: [
+      b('theme:buio', 'Studio'), b('theme:spazio', 'Spazio'), b('theme:acqua', "Sott'acqua"), b('theme:tramonto', 'Tramonto'),
+      b('theme:aurora', 'Aurora'), b('mr', 'Realtà mista'), b('gravity', 'Gravità: NO'), b('lamp', 'Lampada'),
+      b('w:rain', 'Pioggia'), b('w:snow', 'Neve'), b('w:storm', 'Temporale'), b('w:clear', 'Sereno'),
+      b('deskReset', 'Scrivania a posto'), b('home', 'Torna qui'), b('deskToggle', 'Scrivania: SÌ'),
+    ],
+  },
+  {
+    id: 'sistema', label: 'Sistema', color: '#7fe3ff', hint: 'Tutto resta salvato su questo visore. In VR tieni premuto A (o X) e parla.',
     buttons: [
       b('slot', 'Progetto 1'), b('save', 'Salva'), b('load', 'Apri'), b('new', 'Nuovo'),
-      b('talk', 'Parla con AI'), b('pitch+', 'Voce acuta'), b('pitch-', 'Voce grave'), b('help', 'Aiuto'),
-      b('export', 'Esporta GLB'), b('invite', 'Invita'), b('clear', 'Svuota'),
+      b('talk', 'Parla (A)'), b('listenAlways', 'Ascolto: NO'), b('pitch+', 'Voce acuta'), b('pitch-', 'Voce grave'),
+      b('help', 'Aiuto'), b('clear', 'Svuota tutto'),
     ],
   },
 ];
@@ -98,12 +72,11 @@ const GESTURES = 'Per smontare: fai un doppio pizzico su un oggetto per aprirlo,
   + 'Con Due mani su Esplodi, prendi un oggetto con due mani e allargale: si apre quanto vuoi. '
   + 'Per buttare qualcosa, lascialo cadere nel cestino accanto alla scrivania.';
 
-const HELP = 'Puoi dirmi di creare quasi qualsiasi cosa: un maiale, una macchina vera, tre pizze, uno scheletro gigante, una casa. '
-  + 'Puoi cambiare il tempo: fai piovere sopra di me, temporale, neve, arcobaleno. Puoi diventare gigante o minuscolo, e volare. '
-  + 'Crea un pezzo dal pannello. Con le mani pizzicalo per prenderlo, tocca i pulsanti col dito, e usa due mani per ingrandirlo. '
-  + 'Coi controller usa grilletto e grip; lo stick sinistro ti fa camminare, il destro ti gira. Punta il pavimento e premi per teletrasportarti. '
-  + 'Raggruppa unisce più pezzi in un assieme. Puoi cambiare ambiente: spazio, sott\'acqua, tramonto, aurora. '
-  + 'Esplodi apre un livello alla volta, Esplodi tutto smonta fino all’ultima vite, Ricomponi rimonta.';
+const HELP = 'Tieni premuto A e chiedimi un oggetto: una sedia, un portatile, una pizza, una macchina vera. '
+  + 'In realtà mista prendi in mano un oggetto vero e giralo davanti agli occhi: lo scansiono e lo ricreo sulla scrivania. '
+  + 'Per spostare la scrivania prendi le maniglie luminose sul bordo: con una mano la alzi e la sposti, con due la giri. '
+  + 'Pizzica un oggetto per prenderlo, doppio pizzico per aprirlo, pizzico tenuto fermo per staccare un pezzo, due mani per ingrandirlo. '
+  + 'Puoi cambiare ambiente e tempo: spazio, sott\'acqua, pioggia, neve.';
 
 const COLORS = {
   ross: 0xff4a3d, blu: 0x4f8cff, azzurr: 0x7fc8ff, verd: 0x45d483, giall: 0xffc845, viola: 0xb57bff,
@@ -119,7 +92,7 @@ const SHAPES = [
 export function createActions(ctx) {
   const { workspace, ai, panel, env, themes } = ctx; // ctx.net arriva dopo, quando Firebase è pronto
   let multi = false;
-  let lastMsg = 'Ciao! Sono qui in fondo, nel buio. Crea qualcosa sulla scrivania.';
+  let lastMsg = 'Ciao! Sono qui sulla scrivania. Chiedimi un oggetto, o prendine uno vero in mano per scansionarlo.';
 
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -330,6 +303,7 @@ export function createActions(ctx) {
       return on ? 'Gravità attiva: gli oggetti cadono, si appoggiano e puoi lanciarli.' : 'Gravità spenta: gli oggetti restano sospesi dove li lasci.';
     },
     export: exportGLB,
+    deskReset: () => (ctx.deskGrab?.reset(), 'Scrivania rimessa al suo posto.'),
     deskUp: () => moveDesk(0.03),
     deskDown: () => moveDesk(-0.03),
     clear: () => (workspace.clear(), 'Scrivania ripulita.'),
@@ -351,6 +325,7 @@ export function createActions(ctx) {
     const y = Math.max(-0.25, Math.min(0.4, env.deskRig.position.y + dy));
     env.setDeskHeight(y);
     store.set(DESK_KEY, String(y));
+    ctx.deskGrab?.save();
     return `Altezza scrivania: ${Math.round((0.75 + y) * 100)} cm.`;
   }
 
@@ -419,7 +394,7 @@ export function createActions(ctx) {
 
   /** Interpreta un comando in linguaggio naturale (italiano), tollerante agli errori della voce. */
   function voice(raw) {
-    const t = norm(raw);
+    const t = norm(fixTranscript(raw));
     const has = (re) => re.test(t);
     const say = (m) => { if (m) notify(m, true); return m; };
     const item = findItem(t);
@@ -475,11 +450,11 @@ export function createActions(ctx) {
     // ---------- oggetti: crea, oppure agisci su quelli che ci sono
     const verb = /\b(esplodi|smonta|disassembla|apri|ricomponi|rimonta|chiudi|ruota|gira|colora|dipingi|vernicia|ingrandisci|rimpicciolisci|duplica|copia|clona|seleziona|capovolgi|estrai|sposta)\b/.test(t);
     if (item && REMOVE.test(t)) {
-      if (!selectByName(item.label)) return say(`Qui non c'è nessun ${item.label.toLowerCase()}.`);
+      if (!selectByName(item.label)) return say(`Sulla scrivania non vedo: ${item.label.toLowerCase()}.`);
       return run('delete', { speak: true });
     }
     if (item && verb) {
-      if (!selectByName(item.label)) return say(`Qui non c'è nessun ${item.label.toLowerCase()}: dimmi di crearlo.`);
+      if (!selectByName(item.label)) return say(`Sulla scrivania non vedo: ${item.label.toLowerCase()}. Dimmi di crearlo.`);
     } else if (item) {
       return say(ctx.spawn?.(item, { count: countIn(t), size: sizeIn(t), where: whereIn(t), color: colorIn(t) }));
     }
@@ -496,6 +471,12 @@ export function createActions(ctx) {
     if (has(/\b(carica|riapri)\b/)) return run('load', { speak: true });
     if (has(/esporta/)) return run('export', { speak: true });
     if (has(/ingrandisci|piu grande|allarga tutto/)) return run('s+', { speak: true });
+    if (!item && has(/\bscrivania\b/)) {
+      if (has(/rimetti|riporta|a posto|come prima|iniziale|reset/)) { ctx.deskGrab?.reset(); return say('Scrivania rimessa al suo posto.'); }
+      if (has(/\balza|\bsu\b|piu alt/)) return say(moveDesk(0.05));
+      if (has(/abbassa|\bgiu\b|piu bass/)) return say(moveDesk(-0.05));
+      if (has(/sposta|muovi|gira|ruota|prendi|avvicina/)) return say('Prendi una delle due maniglie luminose sul bordo davanti e trascinala: con due mani la puoi anche girare.');
+    }
     if (has(/rimpicciolisci|piu piccol|riduci/)) return run('s-', { speak: true });
     if (has(/\b(ruota|gira)\b/)) return run('rotate', { speak: true });
     if (has(/capovolgi/)) return run('flip', { speak: true });
@@ -513,7 +494,7 @@ export function createActions(ctx) {
     const shape = SHAPES.find(([, re]) => re.test(t));
     if (shape) return run(shape[0], { speak: true });
     const m = t.match(/\b(crea|creami|fammi|fai|metti|mettimi|aggiungi|genera|costruisci|evoca|voglio|dammi|disegna|materializza|appari)\b\s+(?:un |uno |una |un'|il |lo |la |dei |delle |degli |i |gli |le )?(\w+)/);
-    if (m) return say(`Non ho ancora ${m[2]} nel mio catalogo. Apri la scheda Oggetti: ci sono più di cinquanta cose, da animali e veicoli a cibo, mobili e persone.`);
+    if (m) return say(`«${m[2]}» non è tra i miei oggetti pronti. Inserisci la chiave di Claude nella pagina iniziale e potrò costruire qualsiasi cosa; intanto guarda la scheda Crea.`);
     return say('Non ho capito bene: ripetilo in un altro modo.');
   }
 

@@ -59,6 +59,8 @@ export class XRInput {
       });
       c.addEventListener('disconnected', () => {
         this.release(c);
+        this.desk?.release(c);
+        c.userData.deskButton = null;
         c.userData.source = null;
         c.userData.dot.visible = false;
       });
@@ -231,7 +233,10 @@ export class XRInput {
           this.grab(c, node, c.userData.anchor, 'select', this.nearMesh);
           return;
         }
+        if (this.desk?.tryGrab(c, _v1.clone(), 0.06)) { c.userData.deskButton = 'select'; this.haptic(c, 0.4, 30); return; }
       }
+    } else if (this.desk?.tryGrab(c, c.userData.grip.getWorldPosition(new THREE.Vector3()), 0.09)) {
+      c.userData.deskButton = 'select'; this.haptic(c, 0.4, 30); return;
     }
     const hit = this.intersect(c);
     if (!hit) return;
@@ -250,6 +255,7 @@ export class XRInput {
     if (this.isHand(c)) return;
     const node = this.nearestNode(c.userData.grip.getWorldPosition(new THREE.Vector3()), 0.06);
     if (node) { this.grab(c, node, c.userData.grip, 'squeeze', this.nearMesh); return; }
+    if (this.desk?.tryGrab(c, c.userData.grip.getWorldPosition(new THREE.Vector3()), 0.09)) { c.userData.deskButton = 'squeeze'; this.haptic(c, 0.4, 30); return; }
     const hit = this.intersect(c);
     if (hit?.kind === 'part') {
       const n = this.workspace.resolvePick(hit.object);
@@ -260,6 +266,7 @@ export class XRInput {
   }
 
   onButtonEnd(c, button) {
+    if (c.userData.deskButton === button) { c.userData.deskButton = null; this.desk?.release(c); return; }
     if (this.twoHand?.b === c && this.twoHand.button === button) { this.endTwoHand(); return; }
     if (c.userData.grabButton === button) this.release(c);
   }
@@ -391,6 +398,7 @@ export class XRInput {
     if (!this.renderer.xr.isPresenting) return;
     let hoverNode = null;
     let markerAt = null;
+    const deskPoints = new Map();
 
     for (const c of this.controllers) {
       const { line, dot, source } = c.userData;
@@ -412,7 +420,10 @@ export class XRInput {
         if (p) nearNode = this.nearestNode(p, isHand ? 0.03 : 0.06);
       }
 
-      const hideRay = c.userData.poking || nearNode || (c.userData.grabbed && c.userData.grabbed.parent !== c);
+      const hp = this.holdPoint(c, new THREE.Vector3());
+      deskPoints.set(c, hp);
+      const nearDesk = this.desk && hp && (this.desk.holding(c) || this.desk.nearest(hp).dist < 0.1);
+      const hideRay = c.userData.poking || nearNode || nearDesk || (c.userData.grabbed && c.userData.grabbed.parent !== c);
       const hit = hideRay ? null : this.intersect(c);
       line.visible = !hideRay;
       if (hit) {
@@ -463,6 +474,8 @@ export class XRInput {
         }
       }
     }
+
+    this.desk?.update(deskPoints, dt);
 
     // scala a due mani
     for (const c of this.controllers) this.checkLongPress(c);
