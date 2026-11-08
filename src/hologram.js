@@ -39,6 +39,8 @@ uniform vec3 uColor;
 uniform float uStrands;
 uniform float uBody;
 uniform float uGain;
+uniform sampler2D uMap;
+uniform float uUseMap;
 varying vec3 vView;
 varying vec3 vWorld;
 varying vec2 vUv2;
@@ -48,15 +50,24 @@ void main() {
   vec3 V = normalize(vView);
   float facing = abs(dot(N, V));
   float rim = pow(1.0 - facing, 2.2);
-  // linee di scansione che scorrono verso l'alto
-  float scan = 0.65 + 0.35 * sin(vWorld.y * 900.0 - uTime * 6.0);
+  // luce morbida da davanti in alto: dà volume al viso
+  float key = max(dot(N, normalize(vec3(-0.35, 0.55, 0.75))), 0.0);
+  float fill = max(dot(N, normalize(vec3(0.6, 0.1, 0.8))), 0.0);
+  float shade = 0.35 + 0.75 * key + 0.25 * fill;
+  // dettagli veri del volto (occhi, sopracciglia, labbra) dalla sua texture, in luce azzurra
+  vec3 tex = texture2D(uMap, vUv2).rgb;
+  float lum = dot(tex, vec3(0.299, 0.587, 0.114));
+  float detail = mix(1.0, 0.3 + 1.1 * smoothstep(0.05, 0.85, lum), uUseMap);
+  // linee di scansione sottili che scorrono verso l'alto
+  float scan = 0.86 + 0.14 * sin(vWorld.y * 1500.0 - uTime * 6.0);
   float band = smoothstep(0.0, 0.015, abs(fract(vWorld.y * 3.0 - uTime * 0.35) - 0.5) - 0.47);
   float flick = 0.92 + 0.08 * sin(uTime * 37.0) * sin(uTime * 13.0);
   float strands = mix(1.0, 0.55 + 0.45 * sin(vUv2.x * 260.0 + sin(vUv2.y * 9.0) * 2.0), uStrands);
   // il corpo svanisce verso il basso
   float fade = mix(1.0, smoothstep(uBaseY, uBaseY + 0.09, vWorld.y), uBody);
   float energy = (0.55 + 0.9 * uLevel) * uGain;
-  vec3 col = uColor * (0.18 * facing + 1.25 * rim) * scan * flick * strands * energy;
+  vec3 col = uColor * (mix(0.18 * facing, 0.42 * shade * detail, uUseMap) + 1.1 * rim * mix(1.0, smoothstep(0.15, 0.6, lum), uUseMap)) * scan * flick * strands * energy;
+  col += vec3(0.85, 0.95, 1.0) * pow(key, 12.0) * 0.25 * uUseMap * energy; // riflesso morbido
   col += uColor * band * 0.6;
   col += vec3(1.0, 0.3, 0.6) * uGlitch * 0.35 * h(floor(vWorld.y * 200.0) + uTime);
   gl_FragColor = vec4(col * fade, 1.0);
@@ -69,6 +80,8 @@ function holoMaterial(shared, extra = {}) {
       uStrands: { value: extra.strands ? 1 : 0 },
       uBody: { value: extra.body ? 1 : 0 },
       uGain: { value: extra.gain ?? 1 },
+      uMap: { value: extra.map || null },
+      uUseMap: { value: extra.map ? 1 : 0 },
     },
     vertexShader: HOLO_VERT,
     fragmentShader: HOLO_FRAG,
@@ -123,7 +136,7 @@ export class Hologram {
           gl_FragColor = vec4(uColor * edge * up * rays * (0.12 + 0.12 * uLevel), 1.0); }`,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
     });
-    const beamH = this.headY - 0.06;
+    const beamH = 0.13; // il fascio sale fino alla bolla
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.045, beamH, 48, 1, true), this.beamMat);
     beam.position.y = 0.023 + beamH / 2;
     // particelle di luce che salgono
@@ -165,7 +178,13 @@ export class Hologram {
 
     model.traverse((o) => {
       if (!o.isMesh) return;
-      o.material = holoMaterial(this.shared, { gain: 1.35 });
+      const map = o.material.map || null;
+      if (map) { map.colorSpace = THREE.NoColorSpace; map.anisotropy = 4; }
+      // occhi e denti più tenui: altrimenti sembrano occhiali e un sorriso troppo acceso
+      const small = o.geometry.attributes.position.count < 1000;
+      // denti e lingua: nell'ologramma fanno un rettangolo luminoso sulla bocca
+      if (o.name === 'mesh_3') { o.visible = false; return; }
+      o.material = holoMaterial(this.shared, { gain: small ? 0.35 : 1.25, map });
       o.frustumCulled = false;
       if (o.morphTargetDictionary && o.morphTargetDictionary.jawOpen !== undefined) this.face = o;
     });
@@ -181,24 +200,36 @@ export class Hologram {
     bust.position.y = this.headY - this.headHeight * 0.42;
     this.figure.add(bust);
 
-    // capelli lunghi: calotta leggera + tante ciocche luminose che scendono morbide
-    const hairMat = holoMaterial(this.shared, { strands: true, side: THREE.DoubleSide, gain: 0.6 });
-    const strandMat = holoMaterial(this.shared, { gain: 0.45 });
-    const rx = w * 0.53, rz = d * 0.55, hh = this.headHeight;
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24, 0, Math.PI * 2, 0, Math.PI * 0.4), hairMat);
-    cap.scale.set(rx * 1.04, hh * 0.52, rz * 1.06);
-    cap.position.set(0, hh * 0.08, -d * 0.04);
+    // capelli lunghi: calotta aderente alla testa vera + tante ciocche sottili che scendono morbide
+    const hairMat = holoMaterial(this.shared, { strands: true, side: THREE.FrontSide, gain: 0.3 });
+    const strandMat = holoMaterial(this.shared, { gain: 0.5 });
+    this.headPivot.updateMatrixWorld(true);
+    const fb = new THREE.Box3();
+    if (this.face) {
+      const inv = new THREE.Matrix4().copy(this.headPivot.matrixWorld).invert();
+      const g = this.face.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      fb.copy(g.boundingBox).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, this.face.matrixWorld));
+    } else fb.set(new THREE.Vector3(-w / 2, -this.headHeight / 2, -d / 2), new THREE.Vector3(w / 2, this.headHeight / 2, d / 2));
+    const fc = fb.getCenter(new THREE.Vector3()), fs = fb.getSize(new THREE.Vector3());
+    const rx = fs.x * 0.5 * 1.1, rz = fs.z * 0.5 * 1.15, hh = fs.y;
+    const capY = fc.y - hh * 0.02; // centro della calotta, la sommità sfiora la fronte
+    const capH = fb.max.y - capY - hh * 0.06;
+    const capZ = fc.z - fs.z * 0.04;
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat);
+    cap.scale.set(rx, capH, rz);
+    cap.position.set(fc.x, capY, capZ);
     this.hair = new THREE.Group();
     this.hair.add(cap);
     const curves = [];
-    const N = 70;
+    const N = 150;
     for (let i = 0; i < N; i++) {
       // ciocche distribuite dietro e ai lati (0 = dietro la nuca)
       const a = (i / (N - 1) - 0.5) * 3.2 + (Math.random() - 0.5) * 0.05; // ±92°: dietro e fino alle orecchie
       const side = Math.abs(a) > 1.2; // ai lati del viso
       const polar = 0.28 + Math.random() * 0.12;
       const sx = Math.sin(a), sz = -Math.cos(a);
-      const top = new THREE.Vector3(sx * Math.sin(polar * Math.PI) * rx, hh * 0.08 + Math.cos(polar * Math.PI) * hh * 0.5, sz * Math.sin(polar * Math.PI) * rz - d * 0.04);
+      const top = new THREE.Vector3(fc.x + sx * Math.sin(polar * Math.PI) * rx, capY + Math.cos(polar * Math.PI) * capH, capZ + sz * Math.sin(polar * Math.PI) * rz);
       const len = side ? hh * (0.9 + Math.random() * 0.3) : hh * (1.15 + Math.random() * 0.35);
       const pts = [top];
       const steps = 5;
@@ -207,14 +238,14 @@ export class Hologram {
         const out = 1.0 + 0.1 * Math.sin(f * Math.PI * 0.7) + f * f * 0.25; // aderenti alla testa, più larghi sulle spalle
         const wave = Math.sin(f * 6 + i * 0.7) * 0.003;
         pts.push(new THREE.Vector3(
-          sx * rx * out + wave,
+          fc.x + sx * rx * out + wave,
           top.y - len * f,
-          Math.min(sz * rz * out, -d * 0.05) - d * 0.05 - f * 0.015,
+          capZ + Math.min(sz * rz * out, -rz * 0.1) - f * 0.015,
         ));
       }
       curves.push(new THREE.CatmullRomCurve3(pts));
     }
-    const strandGeo = curves.map((c, i) => new THREE.TubeGeometry(c, 20, 0.0018 + (i % 3) * 0.0006, 4, false));
+    const strandGeo = curves.map((c, i) => new THREE.TubeGeometry(c, 24, 0.0011 + (i % 3) * 0.0004, 5, false));
     for (const g of strandGeo) this.hair.add(new THREE.Mesh(g, strandMat));
     this.headPivot.add(this.hair);
 
@@ -262,8 +293,8 @@ export class Hologram {
     this.setMorph('jawOpen', this.jaw);
     this.setMorph('mouthFunnel', speak ? 0.15 + 0.15 * Math.sin(t * 5.3) : 0);
     this.setMorph('mouthClose', speak ? 0 : 0.05);
-    this.setMorph('mouthSmile_L', 0.28);
-    this.setMorph('mouthSmile_R', 0.28);
+    this.setMorph('mouthSmile_L', 0.12);
+    this.setMorph('mouthSmile_R', 0.12);
     this.setMorph('browInnerUp', state === 'listening' ? 0.5 : 0.1 + (speak ? 0.15 * Math.max(0, Math.sin(t * 2.1)) : 0));
     this.setMorph('cheekSquint_L', 0.15);
     this.setMorph('cheekSquint_R', 0.15);

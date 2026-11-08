@@ -589,6 +589,8 @@ export function createActions(ctx) {
   function voice(raw) {
     const t = norm(fixTranscript(raw));
     const has = (re) => re.test(t);
+    // durante la scansione, «fatto» la chiude e crea l'oggetto
+    if (ctx.scanActive?.() && has(/\b(fatto|finito|ho finito|basta|stop|pronto|ecco|ok|vai|crealo|termina)\b/)) { ctx.scanFinish(); return null; }
     const say = (m) => { if (m) notify(m, true); return m; };
     const item = findItem(t);
     const local = has(/(sopra di me|su di me|addosso|sulla (mia )?testa|qui sopra|solo su di me)/);
@@ -636,7 +638,7 @@ export function createActions(ctx) {
       Promise.resolve(ctx.diag?.()).then((m) => m && ai.say(m, { full: true }));
       return null;
     }
-    if (has(/\b(stop|basta|ferma|annulla) (la )?scansion/) && ctx.scanCancel) { ctx.scanCancel(); return say('Scansione annullata.'); }
+    if (has(/\b(annulla|cancella|lascia perdere) (la )?scansion/) && ctx.scanCancel) { ctx.scanCancel(); return say('Scansione annullata.'); }
     if (has(/scansion|scanneriz|scanner|digitalizz|rendil[oa] virtual/)) {
       return FEATURES.claudeAI ? run('scan', { speak: true }) : say('La scansione degli oggetti arriverà più avanti.');
     }

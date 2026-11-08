@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createEnvironment, DESK } from './environment.js';
 import { Hologram } from './hologram.js';
+import { Bubble } from './bubble.js';
 import { Weather } from './weather.js';
 import { VoiceInput } from './voice-input.js';
 import { NeuralVoice } from './tts.js';
@@ -64,9 +65,9 @@ panel.mesh.lookAt(0, 1.25, 0);
 
 const themes = new ThemeManager(scene, env, renderer);
 
-// l'AI è un ologramma sulla scrivania (angolo in fondo a sinistra): la vecchia luce lontana sparisce
+// l'AI è una bolla liquida sospesa sopra un piccolo proiettore sulla scrivania (in fondo a sinistra)
 const hologram = new Hologram(env.deskRig, new THREE.Vector3(-0.5, DESK.h, -0.25), renderer);
-hologram.load(new URL('../assets/models/facecap.glb', import.meta.url).href).catch((e) => console.error('ologramma', e));
+const bubble = new Bubble(hologram.root, { radius: 0.075, y: 0.2 });
 for (const o of [ai.core, ai.inner, ai.outer, ai.glow, ai.halo, ai.motes]) if (o) o.visible = false;
 if (ai.light) ai.light.visible = false;
 ai.group.scale.setScalar(0.09); // sottotitoli piccoli, sopra la testa
@@ -224,7 +225,7 @@ const brain = new Brain({
 /** Ogni comando (voce, testo, pannello «Parla con AI») passa da qui. */
 function command(text) {
   // scansione e diagnostica partono subito, senza passare da Claude
-  const quick = /scansion|scanneriz|diagnostic|cosa non (va|funziona)/i.test(text);
+  const quick = /scansion|scanneriz|diagnostic|cosa non (va|funziona)/i.test(text) || scanner.state === 'capturing';
   // i comandi del menu (gravità, schede, pulsanti) partono subito, senza aspettare Claude
   if (brain.enabled && !quick && actions.menu(text) !== undefined) return;
   if (brain.enabled && !quick) brain.handle(text);
@@ -242,7 +243,10 @@ const scanner = new Scanner({
   isMixedReality: () => mixedReality,
 });
 scanner.appear = (n) => appear(n);
-ctx.scan = () => scanner.start(scanner.bestHand());
+// «scansiona» (o il pulsante) avvia; detto di nuovo, o «fatto», la chiude e crea l'oggetto
+ctx.scan = () => (scanner.state === 'capturing' ? scanner.finish() : scanner.start(scanner.bestHand()));
+ctx.scanActive = () => scanner.state === 'capturing';
+ctx.scanFinish = () => scanner.finish();
 ctx.diag = () => scanner.diagnose();
 ctx.scanCancel = () => scanner.cancel();
 env.turn = (a) => xrInput.turn(a);
@@ -359,7 +363,23 @@ function appear(node) {
   node.scale.multiplyScalar(0.001);
   node.userData.appearing = true;
   const go = () => appearing.set(node, { t: 0, target });
-  renderer.compileAsync(node, camera, scene).then(go, go);
+  safeCompile(node).then(go, go);
+}
+// come renderer.compileAsync, ma non si rompe se l'oggetto viene eliminato mentre si prepara
+function safeCompile(obj) {
+  let mats;
+  try { mats = renderer.compile(obj, camera, scene); } catch { return Promise.resolve(); }
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    const check = () => {
+      for (const m of mats) {
+        const prog = renderer.properties.get(m)?.currentProgram;
+        if (!prog || prog.isReady?.() !== false) mats.delete(m);
+      }
+      if (!mats.size || performance.now() - t0 > 3000) resolve(); else setTimeout(check, 16);
+    };
+    check();
+  });
 }
 function updateAppear(dt) {
   for (const [node, a] of appearing) {
@@ -673,9 +693,11 @@ renderer.setAnimationLoop(() => {
   workspace.update(dt);
   const viewCam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
   hologram.root.getWorldPosition(_hv);
-  ai.base.set(_hv.x, _hv.y + hologram.headY + 0.2, _hv.z);
+  ai.base.set(_hv.x, _hv.y + 0.42, _hv.z);
   ai.update(dt, t, viewCam);
-  hologram.update(dt, { level: ai.level, state: ai.listening ? 'listening' : ai.speaking ? 'speaking' : 'idle', camera: viewCam });
+  const aiState = ai.listening ? 'listening' : ai.speaking ? 'speaking' : 'idle';
+  hologram.update(dt, { level: ai.level, state: aiState, camera: viewCam });
+  bubble.update(dt, { level: ai.level, state: aiState, camera: viewCam });
 
   statusTimer -= dt;
   if (statusTimer <= 0) { panel.setStatus(actions.status()); statusTimer = 0.2; }
@@ -703,4 +725,4 @@ renderer.setAnimationLoop(() => {
 });
 
 setTimeout(() => themes.prewarm(renderer, camera), 1500);
-window.officina = { renderer, scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
+window.officina = { bubble, renderer, scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };

@@ -22,7 +22,7 @@ const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _h = new THREE.Vector3
 export class Scanner {
   constructor({ scene, camera, xrInput, headsetCamera, brain, ai, actions, workspace, isMixedReality }) {
     Object.assign(this, { scene, camera, xrInput, cam: headsetCamera, brain, ai, actions, workspace, isMixedReality });
-    this.auto = true;
+    this.auto = false; // parte solo quando lo chiedi (voce o pulsante)
     this.state = 'idle'; // idle | capturing | building
     this.holdTime = new Map();
     this.cooldown = 0;
@@ -140,6 +140,7 @@ export class Scanner {
   cancel(msg) {
     this.state = 'idle';
     this.ring.visible = false;
+    if (this.preview) this.preview.visible = false;
     this.cooldown = 4;
     if (msg) this.ai.say(msg);
   }
@@ -148,7 +149,7 @@ export class Scanner {
   startDepth(hand) {
     this.state = 'capturing';
     this.mode = 'depth';
-    this.hand = hand;
+    this.hand = hand || this.nearestHand();
     this.elapsed = 0;
     this.lost = 0;
     this.views = [];
@@ -157,11 +158,66 @@ export class Scanner {
     this.startQuat = null;
     this.centerLocal = null;
     this.worldCenter = null;
+    this.saidDone = false;
     this.segs.forEach((s) => { s.material.opacity = 0.25; });
     this.ring.visible = true;
-    this.ai.setSubtitle('Scansione 3D: giralo piano tra le mani.');
-    this.ai.say(hand ? 'Lo vedo. Giralo piano, così lo misuro da tutti i lati.' : 'Tienilo fermo davanti a te e giraci intorno piano.');
+    this.preview ||= this.buildPreview();
+    this.preview.visible = true;
+    this.preview.geometry.setDrawRange(0, 0);
+    this.nextPreview = 0;
+    this.ai.setSubtitle('Scansione 3D: giralo piano. Quando hai finito di\' «fatto».');
+    this.ai.say(this.hand ? 'Giralo piano tra le mani. I puntini verdi sono quello che vedo. Quando hai finito dimmi «fatto».' : 'Non vedo le tue mani: posa i controller e tieni l\'oggetto davanti agli occhi.');
+    if (!this.hand) { this.state = 'idle'; this.ring.visible = false; this.preview.visible = false; }
     return null;
+  }
+
+  /** La mano più vicina al centro dello sguardo (anche se non riconosco la presa). */
+  nearestHand() {
+    this.camera.getWorldPosition(_h);
+    this.camera.getWorldDirection(_f);
+    let best = null, bd = Infinity;
+    for (const c of this.xrInput.controllers) {
+      if (!this.xrInput.isHand(c)) continue;
+      const w = this.joint(c, 'wrist', new THREE.Vector3());
+      if (!w) continue;
+      const v = w.sub(_h);
+      const off = v.clone().sub(_f.clone().multiplyScalar(v.dot(_f))).length(); // distanza dall'asse dello sguardo
+      if (off < bd) { bd = off; best = c; }
+    }
+    return best;
+  }
+
+  /** Nuvola di puntini verdi: quello che il sensore ha già visto dell'oggetto. */
+  buildPreview() {
+    const max = 8000;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(max * 3), 3));
+    const p = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x6ee6a0, size: 0.004, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false, fog: false }));
+    p.frustumCulled = false;
+    p.matrixAutoUpdate = false;
+    p.visible = false;
+    p.userData.max = max;
+    this.scene.add(p);
+    return p;
+  }
+
+  updatePreview() {
+    const f = this.fusion, p = this.preview;
+    const { res, half, hits } = f;
+    let max = 0;
+    for (let i = 0; i < hits.length; i++) if (hits[i] > max) max = hits[i];
+    const thr = Math.max(1, Math.min(4, max * 0.03));
+    const arr = p.geometry.attributes.position.array;
+    const cell = (2 * half) / res;
+    let n = 0;
+    for (let z = 0; z < res && n < p.userData.max; z++) for (let y = 0; y < res && n < p.userData.max; y++) for (let x = 0; x < res && n < p.userData.max; x++) {
+      if (hits[x + y * res + z * res * res] < thr) continue;
+      arr[n * 3] = -half + (x + 0.5) * cell; arr[n * 3 + 1] = -half + (y + 0.5) * cell; arr[n * 3 + 2] = -half + (z + 0.5) * cell;
+      n++;
+    }
+    p.geometry.attributes.position.needsUpdate = true;
+    p.geometry.setDrawRange(0, n);
+    return n;
   }
 
   /** Punti delle mani (da escludere: non fanno parte dell'oggetto). */
@@ -182,62 +238,95 @@ export class Scanner {
     return pts;
   }
 
+  /** Centro presunto dell'oggetto: davanti al palmo, tra pollice e dita. */
+  palmPoint() {
+    const c = this.hand;
+    const pts = ['wrist', 'middle-finger-phalanx-proximal', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip']
+      .map((n) => this.joint(c, n, new THREE.Vector3())).filter(Boolean);
+    if (pts.length < 3) return null;
+    const p = new THREE.Vector3();
+    for (const q of pts) p.add(q);
+    return p.multiplyScalar(1 / pts.length);
+  }
+
   updateDepth(dt) {
-    let center = null, quat = null, wristM = null;
-    if (this.hand) {
-      center = this.holdingReal(this.hand) || (this.lost < 1.5 && this.lastCenter) || null;
-      const wrist = this.hand.userData.hand.joints?.wrist;
-      if (this.holdingReal(this.hand)) this.lost = 0; else this.lost += dt;
-      if (wrist?.visible) {
-        wrist.updateMatrixWorld();
-        wristM = wrist.matrixWorld.clone();
-        quat = wrist.getWorldQuaternion(new THREE.Quaternion());
-      }
-      if (center) this.lastCenter = center.clone();
-    }
+    const wrist = this.hand.userData.hand.joints?.wrist;
+    const tracked = !!wrist?.visible;
+    let wristM = null, quat = null;
+    if (tracked) {
+      wrist.updateMatrixWorld();
+      wristM = wrist.matrixWorld.clone();
+      quat = wrist.getWorldQuaternion(new THREE.Quaternion());
+      this.lost = 0;
+    } else this.lost += dt;
+
     this.camera.getWorldPosition(_h);
-    this.camera.getWorldDirection(_f);
-    if (!this.hand && !this.worldCenter) this.worldCenter = _h.clone().addScaledVector(_f, 0.4);
-    const target = center || this.worldCenter || _w.copy(_h).addScaledVector(_f, 0.38);
-    this.ring.position.lerp(target, Math.min(1, dt * 12));
-    this.ring.lookAt(_h);
-
-    // sistema dell'oggetto: con la mano segue il polso; senza, resta fermo nel mondo
-    let toLocal = null;
-    if (this.hand && wristM && center) {
-      const inv = wristM.clone().invert();
-      if (!this.centerLocal) { this.centerLocal = center.clone().applyMatrix4(inv); this.startQuat = quat.clone(); }
-      toLocal = new THREE.Matrix4().makeTranslation(-this.centerLocal.x, -this.centerLocal.y, -this.centerLocal.z).multiply(inv);
-    } else if (!this.hand) {
-      toLocal = new THREE.Matrix4().makeTranslation(-this.worldCenter.x, -this.worldCenter.y, -this.worldCenter.z);
-      quat = this.camera.getWorldQuaternion(new THREE.Quaternion());
-      if (!this.startQuat) this.startQuat = new THREE.Quaternion();
+    if (tracked && this.centerLocal) {
+      // anello e puntini seguono l'oggetto mentre lo giri
+      const m = wristM.clone().multiply(new THREE.Matrix4().makeTranslation(this.centerLocal.x, this.centerLocal.y, this.centerLocal.z));
+      this.preview.matrix.copy(m);
+      this.preview.matrixWorldNeedsUpdate = true;
+      this.ring.position.lerp(new THREE.Vector3().setFromMatrixPosition(m), Math.min(1, dt * 12));
+    } else if (tracked) {
+      const pp = this.palmPoint();
+      if (pp) this.ring.position.lerp(pp, Math.min(1, dt * 12));
     }
+    this.ring.lookAt(_h);
+    if (!tracked) this.ai.setSubtitle('Non vedo la mano: tienila davanti agli occhi.');
 
-    // lati visti: si accende un segmento per ogni orientamento nuovo
-    if (quat && this.views.every((q) => q.angleTo(quat) > 0.6) && this.views.length < MAX_SHOTS) {
+    // lati visti: un segmento per ogni orientamento nuovo
+    if (quat && this.centerLocal && this.views.every((q) => q.angleTo(quat) > 0.6) && this.views.length < MAX_SHOTS) {
       this.views.push(quat.clone());
       this.segs[this.views.length - 1].material.opacity = 0.95;
-      this.ai.setSubtitle(`Scansione 3D: ${this.views.length} ${this.views.length === 1 ? 'lato' : 'lati'}… continua a girarlo`);
+      this.ai.setSubtitle(`Scansione 3D: ${this.views.length} ${this.views.length === 1 ? 'lato' : 'lati'}… di' «fatto» quando hai finito`);
+      if (this.views.length === 5 && !this.saidDone) { this.saidDone = true; this.ai.say('Lo vedo bene. Dimmi «fatto» quando vuoi.'); }
     }
 
     // una lettura di profondità ogni ~0,12 s (asincrona: non blocca il visore)
     this.nextSample -= dt;
-    if (toLocal && this.nextSample <= 0 && !this.depth.busy) {
+    if (tracked && this.nextSample <= 0 && !this.depth.busy) {
       this.nextSample = 0.12;
       const hands = this.handPoints();
-      const keep = (p) => hands.every((h) => h.distanceToSquared(p) > 0.022 * 0.022);
+      const keep = (p) => hands.every((h) => h.distanceToSquared(p) > 0.02 * 0.02);
+      const inv = wristM.clone().invert();
+      const palm = this.palmPoint();
       const rig = this.xrInput.rig?.matrixWorld;
       this.depth.sample(rig).then((res) => {
         if (!res || this.state !== 'capturing' || this.mode !== 'depth') return;
+        if (!this.centerLocal) {
+          // primo sguardo: il centro dell'oggetto è il centro dei punti vicino al palmo (mano esclusa)
+          if (!palm) return;
+          const c = new THREE.Vector3(); let n = 0;
+          const v = new THREE.Vector3();
+          for (let i = 0; i < res.count; i++) {
+            v.set(res.points[i * 3], res.points[i * 3 + 1], res.points[i * 3 + 2]);
+            if (v.distanceToSquared(palm) > 0.14 * 0.14 || !keep(v)) continue;
+            c.add(v); n++;
+          }
+          if (n < 25) return;
+          c.multiplyScalar(1 / n);
+          this.centerLocal = c.applyMatrix4(inv);
+          this.startQuat = quat.clone();
+          return;
+        }
+        const toLocal = new THREE.Matrix4().makeTranslation(-this.centerLocal.x, -this.centerLocal.y, -this.centerLocal.z).multiply(inv);
         this.fusion.add(res.points, res.count, toLocal, keep);
       }).catch(() => {});
     }
 
-    const n = this.views.length;
-    const enough = (n >= 5 && this.fusion.frames > 30) || this.elapsed > 15 || (this.hand && this.lost > 1.5 && this.fusion.frames > 8);
-    if (this.hand && this.lost > 1.5 && this.fusion.frames <= 8) return this.cancel('L\'ho perso di vista. Tienilo davanti agli occhi e riproviamo.');
-    if (enough) this.buildDepth();
+    this.nextPreview -= dt;
+    if (this.centerLocal && this.nextPreview <= 0) { this.nextPreview = 0.35; this.updatePreview(); }
+    if (this.elapsed > 40) this.finish(); // dopo 40 secondi chiudo comunque
+  }
+
+  /** «Fatto»: costruisce l'oggetto con quello che ha visto. */
+  finish() {
+    if (this.state !== 'capturing') return false;
+    if (this.mode === 'depth') {
+      if (this.fusion.frames < 5) { this.cancel('Non ho visto abbastanza: tienilo davanti agli occhi e riprova.'); return true; }
+      this.buildDepth();
+    } else this.build();
+    return true;
   }
 
   buildDepth() {
@@ -271,6 +360,7 @@ export class Scanner {
     this.workspace.markDirty?.();
     this.state = 'idle';
     this.ring.visible = false;
+    this.preview.visible = false;
     this.cooldown = 6;
     this.explodeAfter = false;
     const cm = (v) => Math.round(v * 100);
