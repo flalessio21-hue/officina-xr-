@@ -9,6 +9,8 @@ import { NeuralVoice } from './tts.js';
 import { DeskGrab } from './desk-grab.js';
 import { Scanner } from './scanner.js';
 import { TableSnap } from './table-snap.js';
+import { Room } from './room.js';
+import { Creatures } from './creatures.js';
 import { AIOrb } from './ai.js';
 import { Workspace } from './workspace.js';
 import { Panel } from './panel.js';
@@ -183,6 +185,7 @@ ctx.virtualReality = () => {
 /** Aspetto del mondo in realtà mista: niente cielo, pavimento, nebbia e particelle. */
 function applyMixedLook(on) {
   mixedReality = on;
+  ctx.room?.setMixed(on);
   if (on) {
     scene.background = null;
     scene.fog = null;
@@ -233,6 +236,8 @@ const brain = new Brain({
   extra: {
     buildFromSpec, setSizeMm, setDeskVisible,
     spawnItem: (item, opts) => spawnItem(item, opts),
+    get room() { return ctx.room; },
+    get creatures() { return ctx.creatures; },
     scan: () => ctx.scan?.(),
     buildRealistic: (input) => {
       const node = scanner.buildFromScan({ name: input.name, parts: input.parts }, []);
@@ -280,6 +285,27 @@ const tableSnap = new TableSnap({
   isMixedReality: () => mixedReality, setRealTable,
 });
 ctx.tableSnap = tableSnap;
+
+// ---------------------------------------------------------------- la stanza decisa a voce + creature
+const room = new Room(scene, {
+  // la stanza si estende davanti alla scrivania: tu e la scrivania state vicino al lato verso di te
+  center: () => { const p = env.deskRig.position; return new THREE.Vector3(p.x, 0, p.z - 1.6); },
+  keepClear: () => [env.deskRig.position.clone(), headPose().pos],
+  onChange: () => { env.floor.visible = !room?.state.floor && themes.current === 'buio' && !mixedReality; },
+});
+room.rebuild();
+const creatures = new Creatures(scene, {
+  bounds: () => {
+    const g = room.group.position;
+    const [W, D] = room.active ? room.state.size : [8, 8];
+    return { x0: g.x - W / 2 + 0.8, x1: g.x + W / 2 - 0.8, z0: g.z - D / 2 + 0.8, z1: g.z + D / 2 - 0.8 };
+  },
+  head: () => headPose().pos,
+  desk: () => env.deskRig.position,
+  ground: () => 0,
+});
+ctx.room = room;
+ctx.creatures = creatures;
 xrInput.tableSnap = tableSnap;
 const scanner = new Scanner({
   scene, camera, xrInput, headsetCamera: camera3, brain, ai, actions, workspace,
@@ -779,6 +805,9 @@ renderer.setAnimationLoop(() => {
   actions.tickHistory(dt);
   themes.update(dt);
   updateAppear(dt);
+  room.update(dt);
+  if (room.active && room.state.floor && env.floor.visible) env.floor.visible = false; // niente pavimenti sovrapposti
+  creatures.update(dt);
   avatars.tick(dt);
   net?.tick(dt, myPose(), workspace.grabbing.size > 0);
 
@@ -810,4 +839,4 @@ renderer.setAnimationLoop(() => {
 });
 
 setTimeout(() => themes.prewarm(renderer, camera), 1500);
-window.officina = { tableSnap, bubble, renderer, scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };
+window.officina = { room, creatures, tableSnap, bubble, renderer, scanner, deskGrab, neural, weather, voiceIn, spawnItem, hologram, brain, headsetCamera: camera3, buildFromSpec, command, applyMixedLook, setDeskVisible, scene, camera, controls, rig, workspace, actions, ai, env, xrInput, themes, avatars, physics, panel };

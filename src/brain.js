@@ -109,6 +109,18 @@ const MENU_TOOL = tool('press_button', 'Preme un pulsante del pannello (qualsias
   button: { type: 'string', enum: MENU.map((m) => m.id), description: MENU.map((m) => `${m.id} = ${m.label}`).join('; ') },
 });
 
+const ROOM_MATS = ['', 'piastrelle', 'piastrelle bianche', 'piastrelle azzurre', 'legno', 'parquet', 'marmo', 'cemento', 'mattoni', 'erba', 'sabbia', 'moquette', 'metallo', 'nero', 'bianco'];
+const ROOM_TOOL = tool('set_room', 'Decide la stanza intorno all\'utente: pavimento, muri, soffitto con luci, piscina, acqua, colonne, piattaforme, luce e mostri che camminano. Metti i valori attuali per ciò che non cambia (vedi describe_scene).', {
+  floor: { type: 'string', enum: ROOM_MATS, description: 'Materiale del pavimento ("" = nessun pavimento)' },
+  walls: { type: 'string', enum: ROOM_MATS, description: 'Materiale dei muri ("" = niente muri)' },
+  ceiling: { type: 'boolean' }, pool: { type: 'boolean' },
+  flood: { type: 'number', description: 'Altezza dell\'acqua che allaga la stanza in metri (0 = asciutta)' },
+  columns: { type: 'integer' }, platforms: { type: 'integer' },
+  width: { type: 'number', description: 'Larghezza stanza in metri (4-30)' }, depth: { type: 'number' }, height: { type: 'number' },
+  light: { type: 'number', description: 'Intensità luci 0.2-2.5' }, warm: { type: 'number', description: '0 luce fredda, 1 calda' },
+  monsters: { type: 'integer', description: 'Quanti mostri-ragno camminano (0 = nessuno)' },
+});
+
 const TOOLS = [
   tool('create_shapes', 'Crea forme semplici sulla scrivania (e le seleziona).', {
     shape: { type: 'string', enum: SHAPES },
@@ -120,6 +132,7 @@ const TOOLS = [
   }),
   CATALOG_TOOL,
   MENU_TOOL,
+  ROOM_TOOL,
   BUILD_TOOL,
   tool('scan_object', 'Avvia la scansione dell\'oggetto vero che l\'utente tiene in mano (serve la realtà mista).', {}),
   tool('select', 'Seleziona gli oggetti sulla scrivania il cui nome contiene il testo dato ("*" = tutti, "" = nessuno). Le altre azioni agiscono sulla selezione.', {
@@ -181,6 +194,7 @@ export class Brain {
       ambiente: this.themes.current,
       gravita: this.physics.enabled ? 'attiva' : 'spenta',
       realta_mista: !!this.extra?.isMixedReality?.(),
+      stanza: this.extra?.room ? { ...this.extra.room.state, mostri: this.extra.creatures?.list.length || 0 } : null,
     };
   }
 
@@ -256,6 +270,20 @@ export class Brain {
           }
         }
         return out.filter(Boolean).join(' ') || 'Fatto.';
+      }
+      case 'set_room': {
+        const room = this.extra.room, cr = this.extra.creatures;
+        if (!room) return 'Stanza non disponibile.';
+        const clamp = (v, a, b, d) => (Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : d);
+        const st = room.state;
+        room.set({
+          floor: input.floor || null, walls: input.walls || null, ceiling: !!input.ceiling, pool: !!input.pool,
+          flood: clamp(input.flood, 0, 2, 0), columns: clamp(input.columns, 0, 24, 0) | 0, platforms: clamp(input.platforms, 0, 12, 0) | 0,
+          size: [clamp(input.width, 4, 30, st.size[0]), clamp(input.depth, 4, 30, st.size[1])], height: clamp(input.height, 2.4, 8, st.height),
+          light: clamp(input.light, 0.2, 2.5, st.light), warm: clamp(input.warm, 0, 1, st.warm),
+        });
+        if (cr) { const n = clamp(input.monsters, 0, 5, cr.list.length) | 0; while (cr.list.length > n) cr.list.pop().dispose(cr.scene); while (cr.list.length < n) cr.spawn('mostro'); }
+        return 'Stanza aggiornata.';
       }
       case 'press_button':
         return actions.run(input.button, { speak: false }) || 'Fatto.';

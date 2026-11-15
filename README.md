@@ -16,6 +16,8 @@ di' «scansiona» e giralo piano (i puntini verdi sono ciò che vede); poi di' �
 
 In **realtà mista** appoggia le mani aperte sul tuo tavolo vero per un secondo: diventa la scrivania (gli oggetti ci si appoggiano sopra).
 
+La stanza la decidi a voce: «fai una piscina», «metti le colonne», «allaga la stanza», «metti un mostro»…
+
 Il codice completo (anche l'app nativa per il Quest) è nel repository privato `metaquest`.
 
 ## Crediti

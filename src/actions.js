@@ -34,6 +34,11 @@ const FIXED_COMMANDS = [
   'nascondi il menu', 'mostra il menu', 'porta qui il menu', 'apri la scheda crea', 'apri la scheda mondo', 'apri la scheda sistema', 'apri la scheda smonta', 'apri la scheda modifica',
   'scansiona', 'scansiona questo oggetto', 'fatto', 'annulla la scansione',
   'quanto è grande', 'quanto misura', 'cosa c\'è sulla scrivania', 'quanti pezzi ha',
+  'fai una piscina', 'togli la piscina', 'pavimento di piastrelle', 'pavimento di legno', 'pavimento di marmo', 'pavimento di erba',
+  'metti i muri', 'muri di piastrelle', 'muri di mattoni', 'togli i muri', 'metti il soffitto', 'togli il soffitto', 'metti le colonne', 'togli le colonne',
+  'allaga la stanza', 'riempi la stanza d\'acqua', 'togli l\'acqua', 'metti le piattaforme', 'togli le piattaforme',
+  'metti un mostro', 'togli il mostro', 'fallo camminare', 'fermalo', 'stanza più grande', 'stanza più piccola', 'stanza piscina',
+  'più luce', 'meno luce', 'luce calda', 'luce fredda', 'spegni le luci', 'accendi le luci', 'togli la stanza',
   'colora di rosso', 'colora di blu', 'colora di verde', 'colora di giallo', 'colora di bianco', 'colora di nero',
 ];
 let PHRASES_READY = false;
@@ -86,6 +91,15 @@ export const PANEL_TABS = [
     ],
   },
   {
+    id: 'stanza', label: 'Stanza', color: '#5fd0c9', hint: 'Decidi la stanza intorno a te (anche a voce, più cose insieme: «piscina con colonne e luci»).',
+    buttons: [
+      b('say:stanza piscina', 'Piscina al chiuso'), b('say:fai una piscina', 'Piscina'), b('say:allaga la stanza', 'Allaga'), b('say:togli l\'acqua', 'Togli acqua'),
+      b('say:pavimento di piastrelle', 'Pav. piastrelle'), b('say:pavimento di legno', 'Pav. legno'), b('say:pavimento di marmo', 'Pav. marmo'), b('say:pavimento di erba', 'Pav. erba'),
+      b('say:metti i muri', 'Muri'), b('say:metti il soffitto', 'Soffitto e luci'), b('say:metti le colonne', 'Colonne'), b('say:metti le piattaforme', 'Piattaforme'),
+      b('say:metti un mostro', 'Mostro'), b('say:togli il mostro', 'Togli mostri'), b('say:luce calda', 'Luce calda'), b('say:togli la stanza', 'Togli stanza'),
+    ],
+  },
+  {
     id: 'mondo', label: 'Mondo', color: '#b57bff', hint: 'Ambiente e tempo. La scrivania la sposti prendendo le maniglie luminose sul bordo.',
     buttons: [
       b('theme:buio', 'Studio'), b('theme:spazio', 'Spazio'), b('theme:acqua', "Sott'acqua"), b('theme:tramonto', 'Tramonto'),
@@ -113,6 +127,7 @@ const GESTURES = 'Per smontare: fai un doppio pizzico su un oggetto per aprirlo,
   + 'Per buttare qualcosa, lascialo cadere nel cestino accanto alla scrivania.';
 
 const HELP = 'Tieni premuto A e parla. Puoi chiedermi un oggetto, per esempio una sedia o una pizza. '
+  + 'Puoi decidere la stanza: fai una piscina, pavimento di piastrelle, metti i muri, il soffitto con le luci, le colonne, allaga la stanza, metti un mostro. '
   + 'Puoi dire: dammi la pizza, ruotala di 90 gradi, spostala a destra di 20 centimetri, falla alta 30 centimetri, duplica 3 volte, rimettila sulla scrivania. '
   + 'Se tieni un oggetto in mano, di\' scomponi quello che ho in mano e potrai prendere i pezzi uno alla volta. '
   + 'Puoi comandare tutto il menu: attiva o disattiva la gravità, apri la scheda mondo, nascondi il menu, porta qui il menu, esplodi tutto, salva, nuovo progetto, parla più veloce. '
@@ -399,6 +414,7 @@ export function createActions(ctx) {
       panel.setTab(id.slice(4));
       return null;
     }
+    if (id.startsWith('say:')) { panel.press(id); return voice(id.slice(4)); }
     if (id.startsWith('cat:')) {
       objectMenu.cat = id.slice(4);
       panel.dirty = true;
@@ -520,6 +536,67 @@ export function createActions(ctx) {
     return undefined;
   }
 
+  // ---- la stanza decisa a voce (anche più cose in una frase) ----
+  const MAT_WORDS = [
+    ['piastrelle bianche', /piastrell\w* bianc/], ['piastrelle azzurre', /piastrell\w* (azzurr|blu|celest)/], ['piastrelle', /piastrell|mattonell|ceramica/],
+    ['parquet', /parquet/], ['legno', /legno/], ['marmo', /marmo/], ['cemento', /cemento|calcestruzzo/], ['mattoni', /mattoni/],
+    ['erba', /erba|prato/], ['sabbia', /sabbia|spiaggia/], ['moquette', /moquette|tappeto/], ['metallo', /metall|acciaio/],
+  ];
+  const matIn = (t) => MAT_WORDS.find(([, re]) => re.test(t))?.[0] || null;
+
+  function roomVoice(t, has, say) {
+    const room = ctx.room, cr = ctx.creatures;
+    if (!room) return undefined;
+    // «togli», «senza»… valgono solo per la cosa che segue (entro un paio di parole)
+    const offFor = (src) => new RegExp(`\\b(togli\\w*|leva\\w*|elimina\\w*|cancella\\w*|rimuovi\\w*|senza|niente|via|basta|svuota|spegni)\\s+(?:\\S+\\s+){0,2}?(?:${src})`).test(t);
+    const s = room.state;
+    const patch = {};
+    const done = [];
+    // tutta la stanza
+    if (has(/(stanza|ambiente) (vuota|normale|come prima)|togli la stanza|cancella la stanza|elimina la stanza|resetta la stanza/)) { room.reset(); cr?.removeAll(); return say('Stanza tolta: siamo di nuovo nel vuoto.'); }
+    // preset: «stanza piscina» come nel video
+    if (has(/stanza (piscina|con la piscina)|piscina (al chiuso|coperta|interna)|parco acquatico|(come|tipo) (una )?piscina/)) {
+      room.set({ floor: 'piastrelle', walls: 'piastrelle bianche', ceiling: true, pool: true, columns: 8, lights: 'pannelli' });
+      return say('Ecco una piscina al chiuso: piastrelle, colonne e luci al soffitto.');
+    }
+    const mat = matIn(t);
+    if (has(/pavimento|\bterra\b|per terra/) && mat) { patch.floor = mat; done.push(`pavimento di ${mat}`); }
+    if (has(/\b(muri|muro|pareti|parete)\b|chiudi la stanza|stanza chiusa/)) {
+      if (offFor('muri|muro|pareti|parete')) { patch.walls = null; done.push('muri tolti'); } else { patch.walls = (has(/(muri|pareti)\b[^,]*\b(di|in|con)\b/) && mat) || (mat && !patch.floor ? mat : s.walls || 'piastrelle bianche'); done.push(`muri di ${patch.walls}`); }
+    }
+    if (has(/soffitto|\btetto\b/)) { if (offFor('soffitto|tetto')) { patch.ceiling = false; done.push('soffitto tolto'); } else { patch.ceiling = true; done.push('soffitto con le luci'); } }
+    if (has(/piscin/)) { if (offFor('piscin')) { patch.pool = false; done.push('piscina tolta'); } else { patch.pool = true; if (!s.floor && !patch.floor) patch.floor = mat || 'piastrelle'; done.push('una piscina'); } }
+    if (has(/allag|riempi\w* (la stanza )?(d.?)?acqua|piena d.?acqua|acqua (fino|alle|alla|al|dappertutto|ovunque|per terra)|metti\w* (l.?|dell.?)?acqua|sommergi/)) {
+      if (has(/svuota|togli|leva|asciuga/)) { patch.flood = 0; done.push('acqua tolta'); } else { patch.flood = has(/vita|petto|alta|profonda/) ? 0.9 : has(/caviglie|bassa|poca/) ? 0.15 : 0.4; done.push('la stanza allagata'); }
+    } else if (has(/(togli|leva|svuota|asciuga)\w* (l.?|tutta l.?)?acqua/)) { patch.flood = 0; done.push('acqua tolta'); }
+    if (has(/colonn|pilastr/)) { if (offFor('colonn|pilastr')) { patch.columns = 0; done.push('colonne tolte'); } else { patch.columns = countIn(t) > 1 ? countIn(t) : 8; if (mat && !patch.floor) patch.colMat = mat; done.push(`${patch.columns} colonne`); } }
+    if (has(/piattaform|zattere|isolett/)) { if (offFor('piattaform|zattere|isolett')) { patch.platforms = 0; done.push('piattaforme tolte'); } else { patch.platforms = countIn(t) > 1 ? countIn(t) : 6; done.push('piattaforme che galleggiano'); } }
+    if (!patch.floor && has(/piastrell|parquet|marmo|moquette/) && !has(/\b(crea|fammi|costruisci)\b (un|una)/) && !patch.walls && patch.colMat == null) { patch.floor = mat; done.push(`pavimento di ${mat}`); }
+    // luci della stanza
+    if (room.active && has(/\bluci\b|luce (della stanza|calda|fredda|soffusa)|piu luce|meno luce|piu luminos|piu buio|illumina/) && !has(/lampada/)) {
+      if (has(/spegni|togli|buio/)) { patch.lights = 'spente'; done.push('luci spente'); }
+      else if (has(/accendi/)) { patch.lights = 'pannelli'; done.push('luci accese'); }
+      if (has(/calda|gialla|soffusa/)) { patch.warm = 1; done.push('luce calda'); }
+      if (has(/fredda|bianca|azzurra/)) { patch.warm = 0; done.push('luce fredda'); }
+      if (has(/piu luce|piu luminos|aumenta la luce|illumina/)) { patch.light = Math.min(2.5, s.light * 1.4); done.push('più luce'); }
+      if (has(/meno luce|piu buio|abbassa la luce|soffusa/)) { patch.light = Math.max(0.2, s.light / 1.4); done.push('meno luce'); }
+    }
+    // dimensioni
+    if (has(/stanza (piu )?(grande|enorme|ampia)|allarga la stanza|ingrandisci la stanza/)) { patch.size = [Math.min(30, s.size[0] * 1.5), Math.min(30, s.size[1] * 1.5)]; done.push('stanza più grande'); }
+    if (has(/stanza (piu )?(piccola|stretta)|rimpicciolisci la stanza|stringi la stanza/)) { patch.size = [Math.max(4, s.size[0] / 1.5), Math.max(4, s.size[1] / 1.5)]; done.push('stanza più piccola'); }
+    if (has(/soffitto (piu )?alto|stanza piu alta/)) { patch.height = Math.min(8, s.height * 1.4); done.push('soffitto più alto'); }
+    if (has(/soffitto (piu )?basso|stanza piu bassa/)) { patch.height = Math.max(2.4, s.height / 1.4); done.push('soffitto più basso'); }
+    // creature
+    if (cr && has(/mostr|ragno gigante|ragnone|creatura|bestia|alien/)) {
+      if (offFor('mostr|ragn|creatur|besti|alien') || has(/scacci|manda via/)) { cr.removeAll(); done.push('mostri via'); }
+      else { const n = Math.min(5, countIn(t) || 1); for (let i = 0; i < n; i++) cr.spawn(has(/ragn/) ? 'ragno' : 'mostro', { size: has(/gigant|enorm/) ? 1.8 : has(/piccol/) ? 0.5 : 1 }); done.push(n > 1 ? `${n} mostri` : 'un mostro che cammina'); }
+    }
+    if (Object.keys(patch).length) room.set(patch);
+    if (!done.length) return undefined;
+    const list = done.length > 1 ? done.slice(0, -1).join(', ') + ' e ' + done.at(-1) : done[0];
+    return say(`Fatto: ${list}.`);
+  }
+
   // ---- comandi in più: oggetto in mano, spostamenti precisi, misure, elenco, ora… ----
   const NUMW = { un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, venti: 20, trenta: 30, quaranta: 40, quarantacinque: 45, cinquanta: 50, sessanta: 60, settanta: 70, ottanta: 80, novanta: 90, cento: 100, centoventi: 120, centottanta: 180, duecentosettanta: 270, trecentosessanta: 360, mezzo: 0.5 };
   const numberIn = (t, re) => {
@@ -538,6 +615,18 @@ export function createActions(ctx) {
   }
 
   function moreCommands(t, has, say, item) {
+    // far camminare un oggetto (persona, animale, robot…)
+    if (has(/\b(fallo|falla|falli|fai|fate) (camminare|muovere|girare|andare in giro|passeggiare)\b|\b(cammina|muoviti|vai in giro)\b/) && !has(/mostr/)) {
+      const n = targetNodes(item);
+      if (!n.length) return say('Prima crea qualcosa da far camminare.');
+      for (const x of n) ctx.creatures?.walk(x, true);
+      return say('Ecco, cammina.');
+    }
+    if (has(/\b(fermalo|fermala|fermali|stai fermo|fermati|smetti di camminare|non camminare)\b/)) {
+      const n = workspace.topLevel().filter((x) => x.userData.walking);
+      for (const x of n) ctx.creatures?.walk(x, false);
+      return say(n.length ? 'Fermo.' : 'Non si muove niente.');
+    }
     // modalità scrivania reale: il tavolo vero diventa il piano di lavoro
     if (has(/modalita (scrivania|tavolo) (reale|vera)|scrivania reale|tavolo reale/)) {
       if (!ctx.isMixedReality?.()) { ctx.pendingRealDesk = true; ctx.mixedReality?.(); return say('Passo alla realtà mista: poi appoggia le mani aperte sul tuo tavolo.'); }
@@ -692,6 +781,8 @@ export function createActions(ctx) {
     const local = has(/(sopra di me|su di me|addosso|sulla (mia )?testa|qui sopra|solo su di me)/);
 
     if (has(/\b(ciao|salve|buongiorno|buonasera|hey|ehi)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa creiamo oggi?');
+    const roomR = roomVoice(t, has, say);
+    if (roomR !== undefined) return roomR;
     const more = moreCommands(t, has, say, item);
     if (more !== undefined) return more;
     const early = t.split(' ').length <= 7 ? menuVoice(t, { early: true }) : undefined;
