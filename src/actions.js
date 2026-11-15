@@ -3,6 +3,7 @@ import { THEMES, ThemeManager } from './themes.js';
 import { LIBRARY } from './library.js';
 import { FEATURES } from './features.js';
 import { CATALOG, ALL_ITEMS } from './catalog.js';
+import { PRESETS, findPreset } from './presets.js';
 import { norm, hasKeyword, findItem, countIn, colorIn, sizeIn, whereIn, REMOVE, fixTranscript, matchCommand, setCommandPhrases } from './intent.js';
 
 const b = (id, label) => ({ id, label });
@@ -52,11 +53,16 @@ export function commandPhrases() {
     for (const w of [it.label, ...(it.words || []).slice(0, 2)]) words.add(w.toLowerCase());
   }
   for (const w of ['cubo', 'sfera', 'cilindro', 'cono', 'piramide', 'toro', 'tubo', 'ingranaggio', 'vite']) words.add(w);
+  const slotted = [];
   for (const w of words) {
-    out.push(`crea un ${w}`, `crea una ${w}`, `fammi un ${w}`, `fammi una ${w}`, `elimina il ${w}`, `elimina la ${w}`,
-      `smonta il ${w}`, `esplodi il ${w}`, `dammi il ${w}`, `dammi la ${w}`, `carica il ${w}`);
+    for (const p of [`crea un ${w}`, `crea una ${w}`, `fammi un ${w}`, `fammi una ${w}`, `elimina il ${w}`, `elimina la ${w}`,
+      `smonta il ${w}`, `esplodi il ${w}`, `dammi il ${w}`, `dammi la ${w}`, `carica il ${w}`]) slotted.push([p, w.split(' ').at(-1)]);
   }
-  return out;
+  for (const p of Object.values(PRESETS)) {
+    const w = p.label.split(' ')[0];
+    for (const f of [`voglio essere in una ${p.label}`, `fai una ${p.label}`, `portami in un ${p.label}`]) slotted.push([f, w]);
+  }
+  return { fixed: out, slotted };
 }
 
 /** Il pannello a sinistra della scrivania, diviso in schede. */
@@ -611,6 +617,22 @@ export function createActions(ctx) {
       room.set({ floor: 'piastrelle', walls: 'piastrelle bianche', ceiling: true, pool: true, columns: 8, lights: 'pannelli' });
       return say('Ecco una piscina al chiuso: piastrelle, colonne e luci al soffitto.');
     }
+    // un luogo intero: «voglio essere in una casa abbandonata», «fai una camera da letto con davanti a me una ragazza»
+    const place = findPreset(t);
+    if (place && (has(/voglio (essere|stare|andare)|portami|andiamo|siamo|mettimi|trasforma|diventa|fai|crea|costruisci|stanza|ambiente|luogo|dentro|^(in |nel|nella|una |un )|^\S+( \S+)?$/))) {
+      const label = ctx.applyPreset?.(place);
+      // «con … (davanti a me / accanto a me)»: persone e oggetti in più, a grandezza reale davanti a te
+      const extras = [];
+      const m = t.match(/\bcon\s+(?:davanti a me|accanto a me|vicino a me|di fronte a me|di fianco a me|intorno a me|dentro)?\s*(.+)$/);
+      if (m) for (const part of m[1].split(/,|\be\b/)) {
+        const it = findItem(part.trim());
+        if (!it) continue;
+        const n = Math.min(6, countIn(part));
+        ctx.spawn?.(it, { count: n, size: 'real', where: 'front', dist: 2.8 }); // oltre la scrivania, ben visibile
+        extras.push(n > 1 ? `${n} ${it.label.toLowerCase()}` : it.label.toLowerCase());
+      }
+      return say(`Ecco: ${label}${extras.length ? ', con ' + extras.join(' e ') + ' davanti a te' : ''}.`);
+    }
     const mat = matIn(t);
     if (has(/pavimento|\bterra\b|per terra/) && mat) { patch.floor = mat; done.push(`pavimento di ${mat}`); }
     if (has(/\b(muri|muro|pareti|parete)\b|chiudi la stanza|stanza chiusa/)) {
@@ -946,6 +968,9 @@ export function createActions(ctx) {
     const m = t.match(/\b(crea|creami|fammi|fai|metti|mettimi|aggiungi|genera|costruisci|evoca|voglio|dammi|disegna|materializza|appari)\b\s+(?:un |uno |una |un'|il |lo |la |dei |delle |degli |i |gli |le )?(\w+)/);
     // non capito: con Claude collegato ci pensa lui (vedi command() in main.js)
     if (opts.unhandled) return opts.unhandled;
+    if (has(/voglio essere (in|su|a|al|nel|nella|dentro)|portami (in|a|al|nel|nella|dentro|su)|trasforma la stanza|fai (una stanza|un ambiente|un posto)/)) {
+      return say(`Quel posto non lo conosco ancora. Posso farti: ${Object.values(PRESETS).map((p) => p.label).join(', ')}, o lo spazio e il fondo del mare. Con la chiave di Claude invento anche gli altri.`);
+    }
     if (m) return say(`«${m[2]}» non è tra i miei oggetti pronti. Inserisci la chiave di Claude nella pagina iniziale e potrò costruire qualsiasi cosa; intanto guarda la scheda Crea.`);
     return say('Non ho capito bene: ripetilo in un altro modo.');
   }
@@ -959,10 +984,10 @@ export function createActions(ctx) {
      * 3) se non la capisco, il comando che le somiglia di più; 4) altrimenti non capito (o Claude).
      */
     hear(raw, opts = {}) {
-      PHRASES_READY ||= (setCommandPhrases(commandPhrases()), true);
+      PHRASES_READY ||= (() => { const c = commandPhrases(); setCommandPhrases(c.fixed, c.slotted); return true; })();
       const t = fixTranscript(raw);
       const m = matchCommand(t);
-      if (m && m.score >= 0.86 && norm(m.text) !== norm(t)) return voice(m.text, opts);
+      if (m && m.score >= 0.86 && m.dist <= 4 && norm(m.text) !== norm(t)) return voice(m.text, opts);
       const NO = Symbol('no');
       const r = voice(t, { unhandled: NO });
       if (r !== NO) return r;

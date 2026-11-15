@@ -18,12 +18,18 @@ export const MATERIALS = {
   sabbia: { label: 'sabbia', kind: 'noise', color: '#d8c08e' },
   moquette: { label: 'moquette', kind: 'noise', color: '#5b5f78' },
   metallo: { label: 'metallo', kind: 'metal', color: '#9aa0a8' },
+  'carta da parati': { label: 'carta da parati', kind: 'wallpaper', color: '#d8c7a6', grout: '#b89a6e' },
+  'carta rovinata': { label: 'carta da parati rovinata', kind: 'wallpaper', color: '#8f846c', grout: '#6b5f49', dirty: true },
+  'legno vecchio': { label: 'legno vecchio', kind: 'wood', color: '#4a3726', dirty: true },
+  intonaco: { label: 'intonaco', kind: 'noise', color: '#e7e1d6' },
+  pietra: { label: 'pietra', kind: 'brick', color: '#7b766d', grout: '#4f4b45', big: true },
+  roccia: { label: 'roccia', kind: 'rock', color: '#5d554b' },
   nero: { label: 'nero', kind: 'plain', color: '#1b1c1f' },
   bianco: { label: 'bianco', kind: 'plain', color: '#e8e8e4' },
 };
 
 export const DEFAULT_ROOM = {
-  on: false, size: [8, 8], height: 3.2,
+  on: false, size: [8, 8], height: 3.2, decor: {}, fog: null, flicker: 0, preset: null,
   floor: null, walls: null, ceiling: false, lights: 'pannelli', light: 1, warm: 0.5,
   pool: false, flood: 0, columns: 0, platforms: 0, colMat: null,
 };
@@ -77,8 +83,25 @@ function texture(matId, repeatX, repeatY) {
       g.globalAlpha = 1;
     } else if (kind === 'grass') {
       for (let k = 0; k < 6000; k++) { g.fillStyle = shade(m.color, (rnd() - 0.5) * 0.5); g.fillRect(rnd() * S, rnd() * S, 2, 4 + rnd() * 5); }
+    } else if (kind === 'wallpaper') {
+      // carta da parati a righe con piccoli motivi
+      for (let x = 0; x < S; x += 32) { g.fillStyle = shade(m.color, x % 64 ? -0.05 : 0.04); g.fillRect(x, 0, 16, S); }
+      g.fillStyle = m.grout;
+      for (let y = 16; y < S; y += 48) for (let x = 24; x < S; x += 64) { g.beginPath(); g.arc(x, y + ((x / 64) % 2) * 24, 5, 0, Math.PI * 2); g.fill(); }
+    } else if (kind === 'rock') {
+      for (let k = 0; k < 400; k++) { g.fillStyle = shade(m.color, (rnd() - 0.5) * 0.45); const r = 6 + rnd() * 30; g.beginPath(); g.ellipse(rnd() * S, rnd() * S, r, r * (0.5 + rnd() * 0.5), rnd() * 3, 0, Math.PI * 2); g.fill(); }
     } else if (kind === 'noise' || kind === 'metal') {
       for (let k = 0; k < 9000; k++) { g.fillStyle = shade(m.color, (rnd() - 0.5) * (kind === 'metal' ? 0.08 : 0.2)); g.fillRect(rnd() * S, rnd() * S, 3, 3); }
+    }
+    if (m.dirty) {
+      // macchie di umidità, strappi e sporco
+      for (let k = 0; k < 18; k++) {
+        const x = rnd() * S, y = rnd() * S, r = 20 + rnd() * 90;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, 'rgba(40,30,15,0.45)'); gr.addColorStop(1, 'rgba(40,30,15,0)');
+        g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      for (let k = 0; k < 10; k++) { g.fillStyle = 'rgba(200,190,170,0.5)'; g.beginPath(); const x = rnd() * S, y = rnd() * S; g.moveTo(x, y); for (let j = 0; j < 6; j++) g.lineTo(x + (rnd() - 0.5) * 60, y + rnd() * 50); g.fill(); }
     }
     base = new THREE.CanvasTexture(c);
     base.colorSpace = THREE.SRGBColorSpace;
@@ -87,7 +110,7 @@ function texture(matId, repeatX, repeatY) {
     texCache.set(key, base);
   }
   const t = base.clone();
-  const scale = (m.kind ? 1.6 : (m.tile || 0.12) * 8); // metri coperti da una ripetizione
+  const scale = m.big ? 3 : m.kind ? 1.6 : (m.tile || 0.12) * 8; // metri coperti da una ripetizione
   t.repeat.set(repeatX / scale, repeatY / scale);
   t.needsUpdate = true;
   return t;
@@ -153,7 +176,7 @@ export class Room {
   /** In realtà mista si vede la stanza vera: restano solo acqua, colonne e piattaforme. */
   setMixed(on) { this.mixed = on; this.rebuild(); }
 
-  get active() { return this.state.on && !!(this.state.floor || this.state.walls || this.state.pool || this.state.flood || this.state.columns || this.state.platforms || this.state.ceiling); }
+  get active() { const s = this.state; return s.on && !!(s.floor || s.walls || s.pool || s.flood || s.columns || s.platforms || s.ceiling || s.preset); }
 
   rebuild() {
     for (const c of [...this.group.children]) {
@@ -162,6 +185,9 @@ export class Room {
     }
     this.waters = [];
     this.floaters = [];
+    this.roomLights = [];
+    this.lightsFx = [];
+    this.dust = null;
     const s = this.state;
     this.onChange?.(this.active);
     if (!this.active) return;
@@ -244,6 +270,8 @@ export class Room {
       const dir = new THREE.DirectionalLight(warm, (s.lights === 'spente' ? 0.05 : 0.6) * s.light);
       dir.position.set(1, H, 2);
       this.group.add(dir);
+      hemi.userData.base = hemi.intensity; dir.userData.base = dir.intensity;
+      this.roomLights = [hemi, dir];
     }
     // colonne (lontano dalla scrivania e dal centro)
     if (s.columns > 0) {
@@ -264,6 +292,7 @@ export class Room {
         this.group.add(col);
       }
     }
+    this.buildDecor(W, D, H, showShell);
     // piattaforme che galleggiano (sull'acqua se c'è, altrimenti sospese basse)
     if (s.platforms > 0) {
       const pm = material(s.floor || 'piastrelle', 1.2, 0.8);
@@ -295,12 +324,209 @@ export class Room {
     this.waters.push(m);
   }
 
+  /** Dettagli dei luoghi: finestre, porta, quadri, tappeto, ragnatele, macerie, polvere, torce… */
+  buildDecor(W, D, H, showShell) {
+    const d = this.state.decor || {};
+    const g = this.group;
+    const rnd = mulberry(7 + (this.state.preset || '').length);
+    const basic = (color, opts = {}) => new THREE.MeshBasicMaterial({ color, toneMapped: false, fog: false, ...opts });
+    const std = (color, opts = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...opts });
+    this.lightsFx = [];
+    // finestre sulla parete di fondo
+    if (d.windows && showShell) {
+      const n = Math.max(1, Math.floor(W / 3.5));
+      for (let i = 0; i < n; i++) {
+        const x = -W / 2 + (i + 0.5) * (W / n), w = Math.min(1.6, W / n - 0.6), h = Math.min(1.6, H - 1.2);
+        const vetrata = d.windows === 'vetrate';
+        const glassCol = d.windows === 'notte' ? 0x1a2a4a : d.windows === 'sbarrate' ? 0x2c3238 : vetrata ? 0xffffff : 0xcfe8ff;
+        const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, vetrata ? h * 1.6 : h), vetrata ? new THREE.MeshBasicMaterial({ map: stainedGlass(), toneMapped: false }) : basic(new THREE.Color(glassCol).multiplyScalar(d.windows === 'giorno' ? 1.25 : 1)));
+        glass.position.set(x, H * 0.55, -D / 2 + 0.01);
+        g.add(glass);
+        const frame = std(0xece6da);
+        for (const [fw, fh, fx, fy] of [[w + 0.1, 0.06, 0, h / 2], [w + 0.1, 0.06, 0, -h / 2], [0.06, h, -w / 2, 0], [0.06, h, w / 2, 0], [w, 0.04, 0, 0], [0.04, h, 0, 0]]) {
+          if (vetrata) break;
+          const f = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.05), frame);
+          f.position.set(x + fx, H * 0.55 + fy, -D / 2 + 0.03);
+          g.add(f);
+        }
+        if (d.windows === 'sbarrate') { // assi inchiodate di traverso
+          for (let k = 0; k < 3; k++) {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.13, 0.03), std(0x5a4430));
+            b.position.set(x, H * 0.55 + (k - 1) * h * 0.32, -D / 2 + 0.07);
+            b.rotation.z = (rnd() - 0.5) * 0.5;
+            g.add(b);
+          }
+        }
+        if (d.windows === 'giorno') { // luce che entra dalla finestra
+          const sun = new THREE.SpotLight(0xfff1d8, 2.2, 9, 0.6, 0.8, 1.5);
+          sun.position.set(x, H * 0.6, -D / 2 + 0.3);
+          sun.target.position.set(x * 0.6, 0, -D / 2 + 3);
+          g.add(sun, sun.target);
+        }
+      }
+    }
+    // porta sulla parete di sinistra
+    if (d.door && showShell) {
+      const door = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.1, 0.95), std(this.state.flicker > 0.5 ? 0x3a2b1e : 0x7a5638));
+      door.position.set(-W / 2 + 0.03, 1.05, -D / 4);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), std(0xc9a64a, { metalness: 0.8, roughness: 0.3 }));
+      knob.position.set(-W / 2 + 0.07, 1.0, -D / 4 + 0.35);
+      g.add(door, knob);
+    }
+    // quadri
+    for (let i = 0; i < (showShell ? d.paintings || 0 : 0); i++) {
+      const side = i % 2 ? 1 : -1;
+      const z = -D / 2 + 1.5 + Math.floor(i / 2) * 2.2;
+      if (z > D / 2 - 2) break;
+      const pic = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.7), new THREE.MeshStandardMaterial({ map: paintingTex(rnd), roughness: 0.6 }));
+      pic.position.set(side * (W / 2 - 0.02), 1.65, z);
+      pic.rotation.y = -side * Math.PI / 2;
+      const fr = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.8, 1.0), std(0x6a4a22, { metalness: 0.3 }));
+      fr.position.set(side * (W / 2 - 0.005), 1.65, z);
+      g.add(fr, pic);
+    }
+    // tappeto
+    if (d.rug) {
+      const rug = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(3.2, W * 0.4), Math.min(2.2, D * 0.3)).rotateX(-Math.PI / 2), std(d.rug, { roughness: 1 }));
+      rug.position.set(0, 0.004, -D / 2 + 2.6);
+      g.add(rug);
+    }
+    // bancone della cucina e vasca del bagno, lavagna, sbarre, mare
+    if (d.counter) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(W * 0.6, 0.9, 0.6), std(0xf2f0ea));
+      c.position.set(-W * 0.1, 0.45, -D / 2 + 0.3);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(W * 0.6 + 0.04, 0.04, 0.64), std(0x2b2b2e, { roughness: 0.3 }));
+      top.position.set(-W * 0.1, 0.92, -D / 2 + 0.3);
+      g.add(c, top);
+    }
+    if (d.tub) {
+      const tub = new THREE.Group();
+      const m = std(0xffffff, { roughness: 0.25 });
+      for (const [w, h, dd, x, z] of [[1.7, 0.55, 0.06, 0, -0.37], [1.7, 0.55, 0.06, 0, 0.37], [0.06, 0.55, 0.8, -0.82, 0], [0.06, 0.55, 0.8, 0.82, 0], [1.7, 0.05, 0.8, 0, 0]]) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), m); p.position.set(x, h === 0.05 ? 0.03 : h / 2, z); tub.add(p);
+      }
+      tub.position.set(-W / 2 + 1, 0, -D / 2 + 0.5);
+      g.add(tub);
+      this.addWater(1.58, 0.68, 0.42, 0);
+      this.waters.at(-1).position.set(-W / 2 + 1, 0.42, -D / 2 + 0.5);
+    }
+    if (d.board && showShell) {
+      const bd = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.2), std(0x23402f, { roughness: 0.9 }));
+      bd.position.set(0, 1.5, -D / 2 + 0.02);
+      g.add(bd);
+    }
+    if (d.bars) {
+      for (let x = -W / 2 + 0.3; x < W / 2; x += 0.18) {
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, H, 8), std(0x3a3b3d, { metalness: 0.8, roughness: 0.4 }));
+        bar.position.set(x, H / 2, D / 2 - 0.4);
+        g.add(bar);
+      }
+    }
+    if (d.sea) this.addWater(60, 30, -0.02, -D / 2 - 14);
+    // ragnatele negli angoli in alto
+    if (d.cobwebs && showShell) {
+      const web = new THREE.MeshBasicMaterial({ map: webTex(), transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, fog: false });
+      for (const [x, z, ry] of [[-W / 2, -D / 2, Math.PI / 4], [W / 2, -D / 2, -Math.PI / 4], [-W / 2, D / 2, Math.PI * 0.75], [W / 2, D / 2, -Math.PI * 0.75]]) {
+        const w = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), web);
+        w.position.set(x * 0.92, H - 0.32, z * 0.92);
+        w.rotation.y = ry;
+        g.add(w);
+      }
+    }
+    // macerie: assi rotte e calcinacci
+    if (d.debris) {
+      for (let i = 0; i < 26; i++) {
+        const plank = rnd() < 0.5;
+        const m = new THREE.Mesh(plank ? new THREE.BoxGeometry(0.6 + rnd() * 0.8, 0.03, 0.1) : new THREE.DodecahedronGeometry(0.04 + rnd() * 0.08), std(plank ? 0x4d3a28 : 0x8a8478));
+        const x = (rnd() - 0.5) * (W - 1), z = -D / 2 + 0.5 + rnd() * (D - 3.5);
+        m.position.set(x, plank ? 0.02 + rnd() * 0.05 : 0.04, z);
+        m.rotation.set(plank ? (rnd() - 0.5) * 0.3 : rnd() * 3, rnd() * 3, plank ? (rnd() - 0.5) * 0.3 : rnd() * 3);
+        g.add(m);
+      }
+    }
+    // polvere che fluttua nella luce
+    if (d.dust) {
+      const N = 500, pos = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) { pos[i * 3] = (rnd() - 0.5) * W; pos[i * 3 + 1] = rnd() * H; pos[i * 3 + 2] = (rnd() - 0.5) * D; }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      this.dust = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xd8cbb0, size: 0.012, transparent: true, opacity: 0.55, depthWrite: false }));
+      g.add(this.dust);
+    } else this.dust = null;
+    // torce alle pareti (fiamma che tremola)
+    for (let i = 0; i < (d.torches || 0); i++) {
+      const side = i % 2 ? 1 : -1, z = -D / 2 + 1.5 + Math.floor(i / 2) * ((D - 3) / Math.max(1, Math.ceil((d.torches) / 2)));
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.4, 8), std(0x3a2a1a));
+      stick.position.set(side * (W / 2 - 0.12), 1.9, z); stick.rotation.z = side * 0.4;
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.18, 10), basic(0xffa040, { transparent: true, opacity: 0.9 }));
+      flame.position.set(side * (W / 2 - 0.2), 2.15, z);
+      const l = new THREE.PointLight(0xff9a40, 1.6, 6, 2);
+      l.position.copy(flame.position);
+      g.add(stick, flame, l);
+      this.lightsFx.push({ light: l, flame, base: 1.6, kind: 'torch' });
+    }
+    // discoteca: luci colorate che girano e una sfera a specchi
+    if (d.disco) {
+      const cols = [0xff2a6d, 0x05d9e8, 0xfff700, 0x7b2ff7];
+      cols.forEach((c, i) => {
+        const l = new THREE.SpotLight(c, 6, 14, 0.45, 0.5, 1);
+        l.position.set((i - 1.5) * 2, H - 0.1, -D / 4);
+        g.add(l, l.target);
+        this.lightsFx.push({ light: l, kind: 'disco', phase: i * 1.7, base: 6 });
+      });
+      const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 2), new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.1, flatShading: true }));
+      ball.position.set(0, H - 0.6, -D / 4);
+      g.add(ball);
+      this.lightsFx.push({ obj: ball, kind: 'spin' });
+    }
+  }
+
   update(dt) {
     this.time += dt;
+    // luci che sfarfallano (casa abbandonata), torce, discoteca
+    const s = this.state;
+    if (s.flicker && this.roomLights) {
+      const on = Math.random() > s.flicker * 0.08 ? 1 : 0.15;
+      for (const l of this.roomLights) l.intensity = l.userData.base * (0.75 + 0.25 * Math.sin(this.time * 23) * Math.sin(this.time * 7.3)) * on;
+    }
+    for (const fx of this.lightsFx || []) {
+      if (fx.kind === 'torch') { const k = 0.8 + 0.2 * Math.sin(this.time * 17 + fx.base) * Math.sin(this.time * 5.3); fx.light.intensity = fx.base * k; fx.flame.scale.set(1, k, 1); }
+      if (fx.kind === 'disco') { const a = this.time * 1.5 + fx.phase; fx.light.target.position.set(Math.sin(a) * 4, 0, -2 + Math.cos(a * 0.7) * 3); fx.light.intensity = fx.base * (0.5 + 0.5 * Math.max(0, Math.sin(this.time * 6 + fx.phase))); }
+      if (fx.kind === 'spin') fx.obj.rotation.y += dt * 0.8;
+    }
+    if (this.dust) { this.dust.rotation.y += dt * 0.01; this.dust.position.y = Math.sin(this.time * 0.2) * 0.05; }
     for (const w of this.waters) w.material.uniforms.uTime.value = this.time;
     for (const f of this.floaters) {
       f.position.y = f.userData.base + Math.sin(this.time * 1.2 + f.userData.phase) * 0.02;
       f.rotation.z = Math.sin(this.time * 0.9 + f.userData.phase) * 0.02;
     }
   }
+}
+
+function paintingTex(rnd) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 200;
+  const g = c.getContext('2d');
+  const hue = Math.floor(rnd() * 360);
+  const gr = g.createLinearGradient(0, 0, 0, 200);
+  gr.addColorStop(0, `hsl(${hue},45%,70%)`); gr.addColorStop(1, `hsl(${(hue + 40) % 360},40%,35%)`);
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 200);
+  for (let k = 0; k < 7; k++) { g.fillStyle = `hsla(${(hue + k * 50) % 360},55%,${30 + rnd() * 40}%,0.8)`; g.beginPath(); g.ellipse(rnd() * 256, 80 + rnd() * 120, 20 + rnd() * 60, 10 + rnd() * 40, rnd() * 3, 0, Math.PI * 2); g.fill(); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+let _web = null;
+function webTex() {
+  if (_web) return _web;
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'); g.strokeStyle = 'rgba(235,235,235,0.9)'; g.lineWidth = 1.2;
+  for (let a = 0; a < 8; a++) { g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(a / 8 * Math.PI / 2) * 256, Math.sin(a / 8 * Math.PI / 2) * 256); g.stroke(); }
+  for (let r = 30; r < 256; r += 26) { g.beginPath(); for (let a = 0; a <= 8; a++) { const ang = (a / 8) * Math.PI / 2; const rr = r + Math.sin(a * 3) * 4; a ? g.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr) : g.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr); } g.stroke(); }
+  _web = new THREE.CanvasTexture(c); return _web;
+}
+let _glass = null;
+function stainedGlass() {
+  if (_glass) return _glass;
+  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+  const g = c.getContext('2d'); const cols = ['#c0392b', '#2e86de', '#f1c40f', '#27ae60', '#8e44ad'];
+  for (let y = 0; y < 256; y += 32) for (let x = 0; x < 128; x += 32) { g.fillStyle = cols[(x / 32 + y / 32) % cols.length]; g.fillRect(x + 2, y + 2, 28, 28); }
+  g.globalCompositeOperation = 'destination-in'; g.beginPath(); g.moveTo(0, 256); g.lineTo(0, 64); g.arc(64, 64, 64, Math.PI, 0); g.lineTo(128, 256); g.fill();
+  _glass = new THREE.CanvasTexture(c); _glass.colorSpace = THREE.SRGBColorSpace; return _glass;
 }

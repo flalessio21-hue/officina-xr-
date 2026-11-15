@@ -114,6 +114,21 @@ const person = (name = 'Persona', shirt = C.blue, pants = C.dark) => G(name, [
   G('Gamba sinistra', [Cy('Coscia', 0.065, 0.42, [-0.09, 0.6, 0], pants), Cy('Polpaccio', 0.055, 0.4, [-0.09, 0.22, 0], pants), B('Scarpa', [0.1, 0.06, 0.24], [-0.09, 0.03, 0.04], C.black)]),
   G('Gamba destra', [Cy('Coscia', 0.065, 0.42, [0.09, 0.6, 0], pants), Cy('Polpaccio', 0.055, 0.4, [0.09, 0.22, 0], pants), B('Scarpa', [0.1, 0.06, 0.24], [0.09, 0.03, 0.04], C.black)]),
 ]);
+// ragazza: capelli lunghi, vestito con gonna svasata, fisico più sottile
+const girl = (name = 'Ragazza', dress = 0xd94f7a, hair = 0x3b2416) => G(name, [
+  G('Testa', [Sp('Testa', 0.1, [0, 1.6, 0], C.skin, [1, 1.15, 1]),
+    Sp('Capelli', 0.108, [0, 1.65, -0.012], hair, [1.05, 0.95, 1.07]),
+    B('Capelli lunghi', [0.24, 0.42, 0.1], [0, 1.43, -0.07], hair),
+    Sp('Ciocca sinistra', 0.045, [-0.1, 1.48, 0.0], hair, [0.6, 2.4, 0.8]), Sp('Ciocca destra', 0.045, [0.1, 1.48, 0.0], hair, [0.6, 2.4, 0.8]),
+    Sp('Occhio sinistro', 0.012, [-0.037, 1.62, 0.092], C.black), Sp('Occhio destro', 0.012, [0.037, 1.62, 0.092], C.black),
+    Sp('Naso', 0.012, [0, 1.585, 0.1], C.skin), Sp('Labbra', 0.016, [0, 1.545, 0.092], 0xc0445a, [1.6, 0.6, 0.7]),
+    Cy('Collo', 0.038, 0.1, [0, 1.46, 0], C.skin)]),
+  G('Vestito', [B('Corpetto', [0.3, 0.42, 0.17], [0, 1.2, 0], dress), Co('Gonna', 0.27, 0.5, [0, 0.82, 0], dress)]),
+  G('Braccio sinistro', [Cy('Braccio', 0.036, 0.3, [-0.2, 1.24, 0], C.skin), Cy('Avambraccio', 0.032, 0.27, [-0.2, 0.96, 0], C.skin), Sp('Mano', 0.038, [-0.2, 0.79, 0], C.skin)]),
+  G('Braccio destro', [Cy('Braccio', 0.036, 0.3, [0.2, 1.24, 0], C.skin), Cy('Avambraccio', 0.032, 0.27, [0.2, 0.96, 0], C.skin), Sp('Mano', 0.038, [0.2, 0.79, 0], C.skin)]),
+  G('Gamba sinistra', [Cy('Gamba', 0.045, 0.55, [-0.08, 0.32, 0], C.skin), B('Scarpa', [0.08, 0.05, 0.2], [-0.08, 0.025, 0.03], 0x2a1a1a)]),
+  G('Gamba destra', [Cy('Gamba', 0.045, 0.55, [0.08, 0.32, 0], C.skin), B('Scarpa', [0.08, 0.05, 0.2], [0.08, 0.025, 0.03], 0x2a1a1a)]),
+]);
 const bone = C.cream;
 const skeleton = () => G('Scheletro', [
   G('Cranio', [Sp('Cranio', 0.1, [0, 1.64, 0], bone, [1, 1.15, 1.1]), B('Mandibola', [0.12, 0.05, 0.1], [0, 1.52, 0.03], bone),
@@ -297,7 +312,7 @@ export const CATALOG = [
   ] },
   { id: 'people', label: 'Persone', items: [
     { id: 'person', label: 'Persona', build: () => person(), words: ['persona', 'uomo', 'umano', 'ragazzo', 'signore', 'manichino', 'omino', 'tizio'] },
-    { id: 'woman', label: 'Donna', build: () => person('Donna', C.red, C.blue), words: ['donna', 'ragazza', 'signora'] },
+    { id: 'woman', label: 'Ragazza', build: () => girl('Ragazza'), words: ['ragazza', 'donna', 'signora', 'ragazze', 'donne', 'fidanzata', 'amica'] },
     { id: 'skeleton', label: 'Scheletro', build: skeleton, words: ['scheletro', 'ossa', 'scheletrico'] },
     { id: 'robot', label: 'Robot', build: robot, words: ['robot', 'androide', 'automa', 'cyborg'] },
     { id: 'astronaut', label: 'Astronauta', build: astronaut, words: ['astronauta', 'cosmonauta'] },

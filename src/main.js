@@ -11,6 +11,8 @@ import { Scanner } from './scanner.js';
 import { TableSnap } from './table-snap.js';
 import { Room } from './room.js';
 import { Creatures } from './creatures.js';
+import { PRESETS } from './presets.js';
+import { ALL_ITEMS } from './catalog.js';
 import { AIOrb } from './ai.js';
 import { Workspace } from './workspace.js';
 import { Panel } from './panel.js';
@@ -273,6 +275,7 @@ const brain = new Brain({
     buildFromSpec, setSizeMm, setDeskVisible,
     spawnItem: (item, opts) => spawnItem(item, opts),
     get room() { return ctx.room; },
+    applyPreset: (id) => applyPreset(id),
     get creatures() { return ctx.creatures; },
     scan: () => ctx.scan?.(),
     buildRealistic: (input) => {
@@ -323,11 +326,17 @@ const tableSnap = new TableSnap({
 ctx.tableSnap = tableSnap;
 
 // ---------------------------------------------------------------- la stanza decisa a voce + creature
+let roomFog = false;
 const room = new Room(scene, {
   // la stanza si estende davanti alla scrivania: tu e la scrivania state vicino al lato verso di te
   center: () => { const p = env.deskRig.position; return new THREE.Vector3(p.x, 0, p.z - 1.6); },
   keepClear: () => [env.deskRig.position.clone(), headPose().pos],
-  onChange: () => { env.floor.visible = !room?.state.floor && themes.current === 'buio' && !mixedReality; },
+  onChange: () => {
+    env.floor.visible = !room?.state.floor && themes.current === 'buio' && !mixedReality;
+    // atmosfera del luogo: nebbia (casa abbandonata, grotta…); senza, torna quella dell'ambiente
+    if (room?.active && room.state.fog && !mixedReality) { scene.fog = new THREE.FogExp2(room.state.fog[0], room.state.fog[1]); roomFog = true; }
+    else if (roomFog) { roomFog = false; if (!mixedReality) themes.apply(themes.current); }
+  },
 });
 room.rebuild();
 const creatures = new Creatures(scene, {
@@ -342,6 +351,43 @@ const creatures = new Creatures(scene, {
 });
 ctx.room = room;
 ctx.creatures = creatures;
+
+/** Un luogo completo: stanza, atmosfera e arredi veri a grandezza reale (vedi presets.js). */
+function applyPreset(id) {
+  const P = PRESETS[id];
+  if (!P) return null;
+  // via gli arredi del luogo precedente e le creature
+  const old = workspace.topLevel().filter((n) => n.userData.preset);
+  if (old.length) { workspace.selected = new Set(old); workspace.remove(); }
+  creatures.removeAll();
+  room.reset();
+  room.set({ ...P.room, decor: P.room.decor || {}, preset: id });
+  if (!mixedReality) {
+    if (P.room.theme && themes.current !== P.room.theme) themes.apply(P.room.theme);
+    // luoghi all'aperto: cielo di giorno al posto del buio
+    if (P.room.sky) { if (themes.current !== 'buio') themes.apply('buio'); scene.background = new THREE.Color(P.room.sky); env.floor.visible = false; }
+    else if (!P.room.theme && scene.background?.isColor && scene.background.getHex() !== 0) themes.apply(themes.current);
+  }
+  const g = room.group.position;
+  for (const [itemId, x, z, rot = 0, y = 0, beh] of P.items) {
+    const item = ALL_ITEMS.find((it) => it.id === itemId);
+    if (!item) continue;
+    const node = item.build();
+    node.userData.preset = id;
+    node.rotation.y = rot;
+    workspace.root.add(node);
+    node.updateWorldMatrix(true, true);
+    const box = new THREE.Box3().setFromObject(node);
+    const world = new THREE.Vector3(g.x + x, y - box.min.y + node.getWorldPosition(new THREE.Vector3()).y, g.z + z);
+    node.position.copy(workspace.root.worldToLocal(world));
+    if (beh === 'walk') creatures.walk(node, true);
+    appear(node);
+  }
+  workspace.clearSelection();
+  workspace.markDirty();
+  return P.label;
+}
+ctx.applyPreset = applyPreset;
 xrInput.tableSnap = tableSnap;
 const scanner = new Scanner({
   scene, camera, xrInput, headsetCamera: camera3, brain, ai, actions, workspace,
@@ -531,7 +577,7 @@ ctx.setSizeMm = (axis, mm) => setSizeMm(axis, mm);
 ctx.scanThenExplode = () => { scanner.explodeAfter = true; ctx.scan(); };
 
 /** Crea un oggetto del catalogo (o della libreria): sulla scrivania, davanti a te o dal cielo. */
-function spawnItem(item, { count = 1, size = 'auto', where = null, color = null } = {}) {
+function spawnItem(item, { count = 1, size = 'auto', where = null, color = null, dist = null } = {}) {
   count = Math.max(1, Math.min(30, count));
   const made = [];
   const box = new THREE.Box3();
@@ -567,7 +613,7 @@ function spawnItem(item, { count = 1, size = 'auto', where = null, color = null 
         target = pos.clone().addScaledVector(fwd, 0.5 + Math.random() * 0.8).addScaledVector(right, (Math.random() - 0.5) * 1.6);
       } else {
         const r = Math.max(size3.x, size3.z) / 2;
-        target = freeSpot(new THREE.Vector3(pos.x, 0, pos.z), fwd, r, Math.max(1.0, r + 0.6), occupiedFootprints(new Set([node])));
+        target = freeSpot(new THREE.Vector3(pos.x, 0, pos.z), fwd, r, Math.max(dist ?? 1.0, r + 0.6), occupiedFootprints(new Set([node])));
       }
       workspace.root.add(node);
       node.position.copy(workspace.root.worldToLocal(target.clone()));

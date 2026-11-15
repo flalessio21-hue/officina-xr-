@@ -105,6 +105,8 @@ export function findItem(t) {
   for (const it of all) for (const w of it.words) entries.push([norm(w), it]);
   entries.sort((a, b) => (b[0].includes(' ') - a[0].includes(' ')) || b[0].length - a[0].length);
   // prima le corrispondenze esatte (o plurali), solo dopo quelle "storpiate" dalla voce
+  const words = new Set(t.split(' '));
+  for (const [k, it] of entries) if (k.includes(' ') ? ` ${t} `.includes(` ${k} `) : words.has(k)) return it; // parola identica
   for (const [k, it] of entries) if (hasKeyword(t, k, true)) return it;
   // parole comuni che "suonano" come oggetti (fatto≈gatto, pronto≈…): mai interpretate come oggetti
   const t2 = t.split(' ').filter((w) => !NOT_ITEMS.has(w)).join(' ');
@@ -150,8 +152,9 @@ function levFull(a, b) {
 
 let PHRASES = null;
 /** phrases: elenco di frasi di comando canoniche (testo). */
-export function setCommandPhrases(list) {
-  PHRASES = [...new Set(list)].map((p) => ({ text: p, key: phonetic(p) }));
+export function setCommandPhrases(list, slotted = []) {
+  const slots = new Map(slotted.map(([p, slot]) => [p, slot]));
+  PHRASES = [...new Set([...list, ...slotted.map(([p]) => p)])].map((p) => ({ text: p, key: phonetic(p), slot: slots.get(p) ? phonetic(slots.get(p)) : null }));
 }
 
 /** La frase di comando più vicina a quello che è stato sentito: { text, score } (score 0..1). */
@@ -159,11 +162,25 @@ export function matchCommand(heard) {
   if (!PHRASES) return null;
   const k = phonetic(heard);
   if (k.length < 3) return null;
-  let best = null, bs = 0;
+  const toks = norm(heard).split(' ').map(phonetic);
+  let best = null, bs = 0, bd = 0;
   for (const p of PHRASES) {
     if (Math.abs(p.key.length - k.length) > Math.max(4, k.length * 0.45)) continue;
-    const sc = 1 - levFull(k, p.key) / Math.max(k.length, p.key.length);
-    if (sc > bs) { bs = sc; best = p; }
+    // frasi con una parola chiave (l'oggetto, il luogo): quella parola deve somigliare davvero a qualcosa che hai detto
+    if (p.slot && !slotHeard(p.slot, toks, k)) continue;
+    const dist = levFull(k, p.key);
+    const sc = 1 - dist / Math.max(k.length, p.key.length);
+    if (sc > bs) { bs = sc; best = p; bd = dist; }
   }
-  return best ? { text: best.text, score: bs } : null;
+  return best ? { text: best.text, score: bs, dist: bd } : null;
+}
+
+/** La parola chiave c'è in quello che è stato detto? Anche attaccata ad altre parole o con un paio di lettere sbagliate. */
+function slotHeard(slot, toks, joined) {
+  const tol = Math.max(1, Math.ceil(slot.length * 0.4));
+  if (toks.some((w) => levFull(w, slot) <= tol)) return true;
+  for (let len = Math.max(2, slot.length - 1); len <= slot.length + 1; len++) {
+    for (let i = 0; i + len <= joined.length; i++) if (levFull(joined.slice(i, i + len), slot) <= Math.max(1, Math.floor(slot.length * 0.34))) return true;
+  }
+  return false;
 }

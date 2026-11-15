@@ -9,6 +9,7 @@
 import { LIBRARY } from './library.js';
 import { ALL_ITEMS } from './catalog.js';
 import { PANEL_TABS } from './actions.js';
+import { PRESETS } from './presets.js';
 import { THEMES } from './themes.js';
 import { FEATURES } from './features.js';
 
@@ -24,7 +25,8 @@ Come ti comporti:
 - Puoi fare più azioni di fila per soddisfare una richiesta (per esempio: creare tre cubi, colorarli di rosso e ingrandirli).
 - Quando l'utente chiede un oggetto: se c'è nel catalogo usa spawn_catalog; altrimenti costruiscilo con build_object in modo realistico (misure vere, forme fedeli, materiali credibili, componenti smontabili). Non dire mai che non puoi crearlo.
 - Se l'utente vuole digitalizzare un oggetto vero che ha in mano, usa scan_object (in realtà mista parte anche da sola quando prende un oggetto in mano).
-- La scrivania si sposta prendendo le maniglie luminose sul bordo; tu sei un ologramma sulla scrivania.
+- La scrivania si sposta prendendo le maniglie luminose sul bordo; tu sei una bolla di luce sulla scrivania.
+- Se l'utente vuole trovarsi in un luogo (una casa abbandonata, una camera, un vulcano, una nave pirata…): usa load_place se esiste un luogo simile, altrimenti costruiscilo tu con set_room (materiali, luci, acqua, colonne) e riempilo di oggetti a grandezza reale con spawn_catalog o build_object. Persone e oggetti richiesti «davanti a me» mettili con spawn_catalog size real.
 - Se ti chiedono informazioni (cosa c'è sulla scrivania, misure, come si fa qualcosa) rispondi con precisione usando describe_scene se serve.
 - Gesti che puoi spiegare: pizzico per prendere, doppio pizzico per aprire o chiudere un oggetto, pizzico tenuto fermo per estrarre un componente, due mani per scalare o aprire, cestino accanto alla scrivania per buttare via.
 - Non puoi aprire siti web o fare cose fuori da questo mondo: se te lo chiedono, dillo in una frase.`;
@@ -121,6 +123,10 @@ const ROOM_TOOL = tool('set_room', 'Decide la stanza intorno all\'utente: pavime
   monsters: { type: 'integer', description: 'Quanti mostri-ragno camminano (0 = nessuno)' },
 });
 
+const PLACE_TOOL = tool('load_place', 'Porta l\'utente in un luogo completo già pronto (stanza, atmosfera e arredi). Poi puoi aggiungere oggetti con spawn_catalog o build_object.', {
+  place: { type: 'string', enum: Object.keys(PRESETS), description: Object.entries(PRESETS).map(([k, p]) => `${k} = ${p.label}`).join(', ') },
+});
+
 const TOOLS = [
   tool('create_shapes', 'Crea forme semplici sulla scrivania (e le seleziona).', {
     shape: { type: 'string', enum: SHAPES },
@@ -133,6 +139,7 @@ const TOOLS = [
   CATALOG_TOOL,
   MENU_TOOL,
   ROOM_TOOL,
+  PLACE_TOOL,
   BUILD_TOOL,
   tool('scan_object', 'Avvia la scansione dell\'oggetto vero che l\'utente tiene in mano (serve la realtà mista).', {}),
   tool('select', 'Seleziona gli oggetti sulla scrivania il cui nome contiene il testo dato ("*" = tutti, "" = nessuno). Le altre azioni agiscono sulla selezione.', {
@@ -284,6 +291,10 @@ export class Brain {
         });
         if (cr) { const n = clamp(input.monsters, 0, 5, cr.list.length) | 0; while (cr.list.length > n) cr.list.pop().dispose(cr.scene); while (cr.list.length < n) cr.spawn('mostro'); }
         return 'Stanza aggiornata.';
+      }
+      case 'load_place': {
+        const l = this.extra.applyPreset?.(input.place);
+        return l ? `Luogo pronto: ${l}.` : 'Luogo sconosciuto.';
       }
       case 'press_button':
         return actions.run(input.button, { speak: false }) || 'Fatto.';
