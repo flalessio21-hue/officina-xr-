@@ -87,6 +87,7 @@ if (physics.enabled) { panel.setLabel('gravity', 'Gravità: SÌ'); panel.setActi
 /** Gli oggetti lasciati cadere nel cestino spariscono. */
 const _bp = new THREE.Vector3();
 function checkBin() {
+  if (env.bin.hidden) return; // cestino tolto: non butta via niente
   const { center, radius, height } = env.bin;
   for (const n of workspace.topLevel()) {
     if (n.userData.grabbed) continue;
@@ -155,7 +156,9 @@ let deskVisible = true;
 function setDeskVisible(v) {
   deskVisible = v;
   for (const c of env.deskRig.children) {
-    if (c === env.workspaceRoot || c === panel.mesh || c.isLight || c.type === 'Object3D') continue;
+    if (c === env.workspaceRoot || c === panel.mesh || c.isLight || c.type === 'Object3D' || c === hologram.root) continue;
+    if (c.name === 'lampada' && hiddenParts.has('lampada')) continue;
+    if (c === env.mat && hiddenParts.has('tappetino')) continue;
     c.visible = v;
   }
   if (physics.enabled) physics.buildStatic();
@@ -164,6 +167,39 @@ function setDeskVisible(v) {
 }
 ctx.toggleDesk = () => setDeskVisible(!deskVisible);
 ctx.deskVisible = () => deskVisible;
+
+// ---------------------------------------------------------------- ogni elemento della scena si può togliere e rimettere
+// (a voce in qualsiasi modo: «fai sparire il cestino», «togli la scrivania», «rimetti la lampada»…)
+const hiddenParts = new Set();
+const lampObj = () => env.deskRig.getObjectByName('lampada');
+const binObj = () => scene.getObjectByName('cestino');
+const PARTS = {
+  scrivania: { set: (v) => setDeskVisible(v), get: () => deskVisible },
+  cestino: { set: (v) => { const b = binObj(); if (b) b.visible = v; env.bin.hidden = !v; if (physics.enabled) physics.buildStatic(); }, get: () => !env.bin.hidden },
+  lampada: { set: (v) => { const l = lampObj(); if (l) l.visible = v && deskVisible; }, get: () => !hiddenParts.has('lampada') },
+  tappetino: { set: (v) => { env.mat.visible = v && deskVisible; if (physics.enabled) physics.buildStatic(); }, get: () => !hiddenParts.has('tappetino') },
+  menu: { set: (v) => { panel.mesh.visible = v; }, get: () => panel.mesh.visible },
+  assistente: { set: (v) => { bubble.root.visible = v; }, get: () => bubble.root.visible },
+  proiettore: { set: (v) => { for (const c of hologram.root.children) if (c !== bubble.root) c.visible = v; }, get: () => !hiddenParts.has('proiettore') },
+  maniglie: { set: (v) => { for (const h of deskGrab.handles) h.visible = v; }, get: () => !hiddenParts.has('maniglie') },
+  pavimento: { set: (v) => { if (!v && room.state.floor) room.set({ floor: null }); env.floor.visible = v && themes.current === 'buio' && !mixedReality; }, get: () => env.floor.visible || !!room.state.floor },
+  sottotitoli: { set: (v) => { ai.subtitle.visible = v; }, get: () => ai.subtitle.visible },
+  mostri: { set: (v) => { if (!v) creatures.removeAll(); }, get: () => creatures.list.length > 0 },
+  oggetti: { set: (v) => { workspace.root.visible = v; }, get: () => workspace.root.visible },
+};
+ctx.sceneParts = PARTS;
+ctx.setPart = (name, v) => {
+  const p = PARTS[name];
+  if (!p) return false;
+  if (v) hiddenParts.delete(name); else hiddenParts.add(name);
+  p.set(v);
+  try { localStorage.setItem('officina-hidden', JSON.stringify([...hiddenParts])); } catch { /* niente */ }
+  return true;
+};
+// ripristina ciò che avevi tolto la volta scorsa (dopo che tutto è stato creato)
+setTimeout(() => {
+  try { for (const n of JSON.parse(localStorage.getItem('officina-hidden') || '[]')) if (PARTS[n] && n !== 'mostri' && n !== 'oggetti') ctx.setPart(n, false); } catch { /* niente */ }
+}, 0);
 // il menu: nascondi, mostra, portalo davanti a te
 ctx.panelVisible = (v) => { panel.mesh.visible = v; };
 ctx.panelHere = () => {

@@ -34,6 +34,9 @@ const FIXED_COMMANDS = [
   'nascondi il menu', 'mostra il menu', 'porta qui il menu', 'apri la scheda crea', 'apri la scheda mondo', 'apri la scheda sistema', 'apri la scheda smonta', 'apri la scheda modifica',
   'scansiona', 'scansiona questo oggetto', 'fatto', 'annulla la scansione',
   'quanto è grande', 'quanto misura', 'cosa c\'è sulla scrivania', 'quanti pezzi ha',
+  'fai sparire la scrivania', 'togli la scrivania', 'rimetti la scrivania', 'fai sparire il cestino', 'togli il cestino', 'rimetti il cestino',
+  'togli la lampada', 'rimetti la lampada', 'togli il tappetino', 'nascondi il menu', 'rimetti il menu', 'fai sparire la bolla', 'sparisci', 'riappari',
+  'togli il proiettore', 'togli le maniglie', 'togli il pavimento', 'togli i sottotitoli', 'nascondi gli oggetti', 'mostra gli oggetti',
   'fai una piscina', 'togli la piscina', 'pavimento di piastrelle', 'pavimento di legno', 'pavimento di marmo', 'pavimento di erba',
   'metti i muri', 'muri di piastrelle', 'muri di mattoni', 'togli i muri', 'metti il soffitto', 'togli il soffitto', 'metti le colonne', 'togli le colonne',
   'allaga la stanza', 'riempi la stanza d\'acqua', 'togli l\'acqua', 'metti le piattaforme', 'togli le piattaforme',
@@ -504,7 +507,7 @@ export function createActions(ctx) {
       if (early && !wantOn && !wantOff && !/(mostra|nascondi)/.test(t)) break;
       if (!tg.words.some((w) => hasKeyword(t, w))) continue;
       if (id === 'deskToggle' && !/(mostra|nascondi|togli|leva|rimetti|fai (sparire|vedere))/.test(t)) continue; // «alza la scrivania» è un'altra cosa
-      if (id === 'lamp' && !/(accendi|spegni|lampada)/.test(t)) continue;
+      if (id === 'lamp' && (!/(accendi|spegni|luce)/.test(t) || /togli|leva|elimina|rimuovi|sparire|nascondi|butta/.test(t))) continue;
       const on = wantOff ? false : wantOn ? true : null;
       const cur = tg.get();
       if (on == null || cur == null) return tg.set(on ?? !cur);
@@ -534,6 +537,55 @@ export function createActions(ctx) {
       return run(best.id, { speak: true }) ?? null;
     }
     return undefined;
+  }
+
+  // ---- ogni elemento della scena: «fai sparire il cestino», «togli la scrivania e la lampada», «rimetti il menu» ----
+  const PARTS_WORDS = [
+    ['scrivania', /\b(scrivania|scrivanie|banco|piano di lavoro|tavolo da lavoro)\b/, 'la scrivania'],
+    ['cestino', /\b(cestino|cestini|secchio|secchiello|pattumiera|spazzatura|bidone|cassonetto|cesto|immondizia|rifiuti)\b/, 'il cestino'],
+    ['lampada', /\b(lampada|lampade|abat ?jour|luce da tavolo|lume)\b/, 'la lampada'],
+    ['tappetino', /\b(tappetino|tappeto|griglia|base da taglio|tappetino da taglio)\b/, 'il tappetino'],
+    ['menu', /\b(menu|menù|pannello|pannelli|pulsanti|pulsantiera|schermata)\b/, 'il menu'],
+    ['assistente', /\b(assistente|bolla|sfera|pallina|palla di luce|intelligenza|te stessa|ai|tu)\b/, 'l\'assistente'],
+    ['proiettore', /\b(proiettore|base luminosa|piedistallo)\b/, 'il proiettore'],
+    ['maniglie', /\b(maniglie|maniglia)\b/, 'le maniglie'],
+    ['pavimento', /\b(pavimento|pavimenti)\b/, 'il pavimento'],
+    ['sottotitoli', /\b(sottotitoli|sottotitolo|scritte|scritta)\b/, 'i sottotitoli'],
+    ['oggetti', /\b(gli oggetti|tutti gli oggetti|le cose)\b/, 'gli oggetti'],
+  ];
+  const HIDE = /\b(fai sparire|fa sparire|fallo sparire|falla sparire|falli sparire|sparire|sparisci|nascondi\w*|togli\w*|leva\w*|elimina\w*|rimuovi\w*|cancella\w*|butta via|via|non voglio piu|non voglio|non mi serve|non serve|senza|occulta|spegni)\b/;
+  const SHOW = /\b(fai (ri)?apparire|riappar\w*|ricompar\w*|apparire|mostra\w*|rimetti\w*|riporta\w*|fammi vedere|fai vedere|fatti vedere|voglio (di nuovo|ancora|indietro)|ridammi|ripristina|torna|metti|accendi|riaccendi)\b/;
+  function sceneVoice(t, say) {
+    if (!ctx.setPart) return undefined;
+    if (/a posto|al suo posto|com.?era prima|posizione iniziale/.test(t)) return undefined; // «rimetti a posto la scrivania» = riposizionarla
+    // «sparisci» / «riappari» detti all'assistente
+    if (/^(sparisci|nasconditi|vattene|scompari)$/.test(t)) { ctx.setPart('assistente', false); return say('Va bene, sparisco. Di\' «riappari» per rivedermi.'); }
+    if (/^(riappari|ricompari|fatti vedere|dove sei|torna|mostrati)$/.test(t)) { ctx.setPart('assistente', true); return say('Eccomi.'); }
+    const clauses = t.split(/,|\b(?:e poi|ma|pero|poi|invece|e)\b/).map((c) => c.trim()).filter(Boolean);
+    let verb = null;
+    const done = [];
+    for (const c0 of clauses) {
+      // «sulla scrivania», «accanto al cestino»… indicano un luogo, non la cosa da togliere
+      const c = c0.replace(/\b(su|sul|sulla|sullo|sui|nel|nella|dal|dalla|alla|al|allo|accanto alla|accanto al|vicino alla|vicino al|sopra la|sopra il|sotto la|sotto il|dentro il|dentro la|davanti alla|davanti al|dietro la|dietro il)\s+(?:la |il |lo |l'|i |le )?\w+/g, ' ');
+      const it = findItem(c);
+      if (it && !PARTS_WORDS.some(([, re]) => re.test(it.label.toLowerCase())) && !/\b(scrivania|cestino|menu|pannello|maniglie|sottotitoli|bolla|assistente)\b/.test(c)) continue;
+      const sh = SHOW.test(c), hd = HIDE.test(c);
+      if (hd) verb = false; else if (sh) verb = true;
+      for (const [id, re, label] of PARTS_WORDS) {
+        if (!re.test(c)) continue;
+        // parole che sono anche oggetti creati (una lampada, un proiettore sulla scrivania): quelli li gestisce l'oggetto
+        if ((id === 'lampada' || id === 'proiettore') && workspace.topLevel().some((n) => n.name.toLowerCase().includes(id))) continue;
+        if (id === 'assistente' && !/\b(assistente|bolla|sfera|pallina|palla di luce|intelligenza|te stessa)\b/.test(c) && !/\btu\b/.test(c)) continue;
+        if (id === 'lampada' && /spegni|accendi/.test(c) && !/sparire|nascondi|togli|leva|rimetti|mostra/.test(c)) continue; // spegnere ≠ far sparire
+        if (verb == null) continue;
+        ctx.setPart(id, verb);
+        const g = /^la |^l'a/.test(label) && !/assistente/.test(label) ? 'a' : /^le /.test(label) ? 'e' : /^(i|gli) /.test(label) ? 'i' : 'o';
+        done.push(`${verb ? 'rimess' : 'tolt'}${g} ${label}`);
+      }
+    }
+    if (!done.length) return undefined;
+    const list = done.length > 1 ? done.slice(0, -1).join(', ') + ' e ' + done.at(-1) : done[0];
+    return say(`Fatto: ${list}.`);
   }
 
   // ---- la stanza decisa a voce (anche più cose in una frase) ----
@@ -587,8 +639,8 @@ export function createActions(ctx) {
     if (has(/soffitto (piu )?alto|stanza piu alta/)) { patch.height = Math.min(8, s.height * 1.4); done.push('soffitto più alto'); }
     if (has(/soffitto (piu )?basso|stanza piu bassa/)) { patch.height = Math.max(2.4, s.height / 1.4); done.push('soffitto più basso'); }
     // creature
-    if (cr && has(/mostr|ragno gigante|ragnone|creatura|bestia|alien/)) {
-      if (offFor('mostr|ragn|creatur|besti|alien') || has(/scacci|manda via/)) { cr.removeAll(); done.push('mostri via'); }
+    if (cr && has(/\bmostr(o|i|iciattol\w*)\b|ragno gigante|ragnone|creatur|bestia|alien/)) {
+      if (offFor('mostr[oi]|ragn|creatur|besti|alien') || has(/scacci|manda via/)) { cr.removeAll(); done.push('mostri via'); }
       else { const n = Math.min(5, countIn(t) || 1); for (let i = 0; i < n; i++) cr.spawn(has(/ragn/) ? 'ragno' : 'mostro', { size: has(/gigant|enorm/) ? 1.8 : has(/piccol/) ? 0.5 : 1 }); done.push(n > 1 ? `${n} mostri` : 'un mostro che cammina'); }
     }
     if (Object.keys(patch).length) room.set(patch);
@@ -615,6 +667,9 @@ export function createActions(ctx) {
   }
 
   function moreCommands(t, has, say, item) {
+    if (has(/a posto|al suo posto|com.?era prima|posizione iniziale/) && has(/\bscrivania\b/) && !findItem(t.replace(/scrivania/g, ''))) { ctx.setRealTable?.(false); ctx.setPart?.('scrivania', true); ctx.deskGrab?.reset(); return say('Scrivania rimessa al suo posto.'); }
+    // «fai sparire tutto» = togli tutti gli oggetti
+    if (has(/^(fai sparire|fa sparire|togli|leva|elimina|cancella|via) tutto$|fai sparire tutto|tutti gli oggetti via/)) return run('clear', { speak: true });
     // far camminare un oggetto (persona, animale, robot…)
     if (has(/\b(fallo|falla|falli|fai|fate) (camminare|muovere|girare|andare in giro|passeggiare)\b|\b(cammina|muoviti|vai in giro)\b/) && !has(/mostr/)) {
       const n = targetNodes(item);
@@ -783,6 +838,8 @@ export function createActions(ctx) {
     if (has(/\b(ciao|salve|buongiorno|buonasera|hey|ehi)\b/) && t.split(' ').length <= 3) return say('Ciao! Cosa creiamo oggi?');
     const roomR = roomVoice(t, has, say);
     if (roomR !== undefined) return roomR;
+    const partR = sceneVoice(t, say);
+    if (partR !== undefined) return partR;
     const more = moreCommands(t, has, say, item);
     if (more !== undefined) return more;
     const early = t.split(' ').length <= 7 ? menuVoice(t, { early: true }) : undefined;

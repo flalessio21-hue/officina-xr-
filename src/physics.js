@@ -75,9 +75,9 @@ export class Physics {
       const center = gb.getCenter(new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
       add(new CANNON.Box(new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2)), center, _q.clone());
     }
-    // pareti del cestino (otto lastre attorno al bordo)
+    // pareti del cestino (otto lastre attorno al bordo), se il cestino c'è
     const { center, radius, height } = this.env.bin;
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < (this.env.bin.hidden ? 0 : 8); i++) {
       const a = (i / 8) * Math.PI * 2;
       const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -a);
       add(new CANNON.Box(new CANNON.Vec3(0.005, height / 2, radius * 0.42)),
